@@ -14,6 +14,17 @@
 </head>
 <body>
 <div class="app">
+  <section class="card" style="margin-bottom:14px" id="authCard">
+    <div class="row between"><div><h2 style="margin:0">Cloud connection</h2><div class="smalltext" id="cloudStatus">Connecting to Supabase…</div></div><div class="row" id="authActions"></div></div>
+    <div id="loginFormWrap" class="hidden" style="margin-top:12px;max-width:520px">
+      <form id="loginForm" class="form-grid">
+        <div class="field wide"><label>Admin email</label><input id="loginEmail" type="email" autocomplete="username" required placeholder="Your Supabase admin email"></div>
+        <div class="field wide"><label>Password</label><input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Your password"></div>
+        <div class="wide row"><button class="primary" type="submit">Log in as admin</button><button type="button" id="cancelLogin">Cancel</button></div>
+      </form>
+      <p class="smalltext">Use the email and password for the Supabase Auth account linked to your admin profile. Passwords are sent directly to Supabase Auth, not stored in this page.</p>
+    </div>
+  </section>
   <header class="top">
     <div class="brand"><div class="logo">🥥</div><div><h1>Pinoy Buko Twist Schedule</h1><p>Staff schedules · availability · reliever finder</p></div></div>
     <div class="top-actions">
@@ -129,18 +140,66 @@
       <div id="relieverResults" style="margin-top:16px"><div class="empty">Choose a date and branch, then tap “Find available relievers”.</div></div>
     </div>
   </section>
-  <div class="footer">Pinoy Buko Twist Schedule · Test copy · Local browser storage (Supabase connection not enabled yet)</div>
+  <div class="footer">Pinoy Buko Twist Schedule · Test copy · Supabase cloud sync · Admin login required to edit official duties</div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const BRANCHES=["Puregold","Ramrod","Ilwas","Baraca"];
 const BRANCH_CLASS={"Puregold":"puregold","Ramrod":"ramrod","Ilwas":"ilwas","Baraca":"baraca"};
 const STORE_KEY="bukoShakeDutyPlanner_v1";
+const SUPABASE_URL="https://mwjbeyztcmdjuxgipatv.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_aaSGpn2mw_PfgHO6_YUZjQ_szVRrVvW";
+const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let currentUser=null,isAdmin=false,dbReady=false,branchIds={};
 const $=id=>document.getElementById(id);
 let viewYear=2026,viewMonth=10,selectedDate="2026-11-01";
 let state={staff:[],duties:[],availability:{}};
-function load(){try{const raw=localStorage.getItem(STORE_KEY);if(raw){const parsed=JSON.parse(raw);state={...state,...parsed};}}catch(e){console.warn("Could not load saved planner",e)}}
-function save(){localStorage.setItem(STORE_KEY,JSON.stringify(state));renderAll()}
-function uid(){return "d"+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function load(){try{const raw=localStorage.getItem(STORE_KEY);if(raw){const parsed=JSON.parse(raw);state={...state,...parsed};}}catch(e){console.warn("Could not load local backup",e)}}
+function save(){try{localStorage.setItem(STORE_KEY,JSON.stringify(state))}catch(e){} renderAll()}
+function uid(){return crypto.randomUUID()}
+function setCloudStatus(message,isError=false){const el=$("cloudStatus");if(el){el.textContent=message;el.style.color=isError?"#a33f37":""}}
+function renderAuth(){
+ const actions=$("authActions"),wrap=$("loginFormWrap"); if(!actions)return; actions.innerHTML="";
+ if(isAdmin){actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';$("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};wrap.classList.add("hidden");}
+ else {actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';$("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden")}
+ document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
+}
+async function checkAdmin(){
+ const {data:{session}}=await supabaseClient.auth.getSession();currentUser=session?.user||null;isAdmin=false;
+ if(currentUser){const {data,error}=await supabaseClient.from('staff_profiles').select('role,active').eq('auth_user_id',currentUser.id).maybeSingle();if(!error&&data&&data.role==='admin'&&data.active===true)isAdmin=true;else await supabaseClient.auth.signOut().catch(()=>{});}
+ renderAuth();return isAdmin;
+}
+async function loadCloudData(){
+ setCloudStatus('Loading shared planner data…');
+ const [br,st,du,av]=await Promise.all([
+  supabaseClient.from('branches').select('id,name'),
+  supabaseClient.from('staff_profiles').select('id,name,employment_type,target_per_week,branches,active,legacy_id').eq('active',true),
+  supabaseClient.from('duty_assignments').select('id,duty_date,branch_id,staff_id,notes'),
+  supabaseClient.from('staff_availability').select('id,staff_id,availability_date,status')
+ ]);
+ const err=[br,st,du,av].find(x=>x.error);if(err){setCloudStatus('Could not load cloud data: '+err.error.message,true);console.error(err.error);return}
+ branchIds={};(br.data||[]).forEach(b=>branchIds[b.id]=b.name);
+ const idByName={};(br.data||[]).forEach(b=>idByName[b.name]=b.id);
+ state.staff=(st.data||[]).map(x=>({id:x.id,name:x.name,type:x.employment_type||'Part-time',target:x.target_per_week??4,branches:Array.isArray(x.branches)&&x.branches.length?x.branches:['ALL'],legacyId:x.legacy_id}));
+ state.duties=(du.data||[]).map(x=>({id:x.id,date:x.duty_date,branch:branchIds[x.branch_id]||'',staffId:x.staff_id,notes:x.notes||''})).filter(x=>x.branch);
+ state.availability={};(av.data||[]).forEach(x=>{state.availability[x.availability_date+'|'+x.staff_id]=x.status==='available'?'Available':x.status==='unavailable'?'Unavailable':'Not sure'});
+ dbReady=true;save();setCloudStatus(isAdmin?'Connected · signed in as admin':'Connected · public viewing and availability editing');
+}
+async function persistDuty(duty){
+ if(!isAdmin){setCloudStatus('Log in as admin to change official duties.',true);await loadCloudData();return false}
+ const branchId=Object.entries(branchIds).find(([id,name])=>name===duty.branch)?.[0];if(!branchId){setCloudStatus('Branch not found in Supabase.',true);return false}
+ let result;
+ if(duty._delete){result=await supabaseClient.from('duty_assignments').delete().eq('id',duty.id)}
+ else {const row={id:duty.id,duty_date:duty.date,branch_id:branchId,staff_id:duty.staffId,notes:duty.notes||''};result=await supabaseClient.from('duty_assignments').upsert(row,{onConflict:'id'})}
+ if(result.error){setCloudStatus('Duty save failed: '+result.error.message,true);await loadCloudData();return false}
+ await loadCloudData();return true;
+}
+async function persistAvailability(date,staffId,status){
+ const dbStatus=status==='Available'?'available':status==='Unavailable'?'unavailable':'not_sure';
+ const {error}=await supabaseClient.from('staff_availability').upsert({staff_id:staffId,availability_date:date,status:dbStatus},{onConflict:'staff_id,availability_date'});
+ if(error){setCloudStatus('Availability save failed: '+error.message,true);await loadCloudData();return false}
+ setCloudStatus('Availability saved to cloud');return true;
+}
 function dateISO(y,m,d){return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`}
 function niceDate(s,opts={month:"short",day:"numeric",year:"numeric"}){if(!s)return "";const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d).toLocaleDateString("en-PH",opts)}
 function monthName(y,m){return new Date(y,m,1).toLocaleDateString("en-PH",{month:"long",year:"numeric"})}
@@ -149,7 +208,7 @@ function staffOptions(includeAll=false){return state.staff.map(s=>({value:s.id,l
 function fillSelectors(){
   ["dutyBranch","relieverBranch"].forEach(id=>setOptions($(id),BRANCHES.map(b=>({value:b,label:b}))));
   setOptions($("branchFilter"),[{value:"",label:"All branches"},...BRANCHES.map(b=>({value:b,label:b}))]);
-  const staff=staffOptions();["dutyStaff","availStaff","staffCalendarPerson"].forEach(id=>setOptions($(id),staff,"Choose staff"));
+  const staff=staffOptions();["availStaff","staffCalendarPerson"].forEach(id=>setOptions($(id),staff,"Choose staff"));
   setOptions($("staffFilter"),[{value:"",label:"All staff"},...staff]);
   setOptions($("replacedStaff"),[{value:"",label:"No specific staff"},...staff]);
 }
@@ -177,7 +236,7 @@ function renderCalendar(target,y,m,full=false){
           ((state.availability[iso+"|"+s.id]||"Not sure")!=="Unavailable" || (current&&current.staffId===s.id)));
         const duplicateCount=current?state.duties.filter(d=>d.date===iso&&d.staffId===current.staffId).length:0;
         const conflictClass=current?(duplicateCount>1?" conflict-duplicate":currentStatus==="Unavailable"?" conflict-unavailable":currentStatus==="Not sure"?" conflict-unsure":""):"";
-        html+=`<td class="schedule-cell${conflictClass}"><select aria-label="${escapeHtml(iso)} ${escapeHtml(branch)}" onchange="setCellDuty('${iso}','${branch}',this.value)"><option value="">— Select staff —</option>${eligibleStaff.map(s=>{const isCurrent=!!(current&&current.staffId===s.id);const unavailable=(state.availability[iso+"|"+s.id]||"Not sure")==="Unavailable";return `<option value="${s.id}" ${isCurrent?"selected":""} ${unavailable&&isCurrent?"disabled":""}>${escapeHtml(s.name)}${unavailable&&isCurrent?" (UNAVAILABLE — currently assigned)":""}</option>`}).join("")}</select>${current&&duplicateCount>1?'<div class="cell-note" style="color:#a11f1f;font-weight:800">⚠ DUPLICATE DUTY</div>':current&&currentStatus==="Unavailable"?'<div class="cell-note" style="color:#a33f37;font-weight:800">⚠ UNAVAILABLE</div>':current&&currentStatus==="Not sure"?'<div class="cell-note" style="color:#86651a;font-weight:800">? NOT SURE</div>':""}${current&&current.notes?`<div class="cell-note">${escapeHtml(current.notes)}</div>`:""}${allDuties.length>1?`<div class="cell-note">+${allDuties.length-1} additional assignment(s)</div>`:""}</td>`;
+        html+=`<td class="schedule-cell${conflictClass}"><select ${!isAdmin?"disabled":""} aria-label="${escapeHtml(iso)} ${escapeHtml(branch)}" onchange="setCellDuty('${iso}','${branch}',this.value)"><option value="">— Select staff —</option>${eligibleStaff.map(s=>{const isCurrent=!!(current&&current.staffId===s.id);const unavailable=(state.availability[iso+"|"+s.id]||"Not sure")==="Unavailable";return `<option value="${s.id}" ${isCurrent?"selected":""} ${unavailable&&isCurrent?"disabled":""}>${escapeHtml(s.name)}${unavailable&&isCurrent?" (UNAVAILABLE — currently assigned)":""}</option>`}).join("")}</select>${current&&duplicateCount>1?'<div class="cell-note" style="color:#a11f1f;font-weight:800">⚠ DUPLICATE DUTY</div>':current&&currentStatus==="Unavailable"?'<div class="cell-note" style="color:#a33f37;font-weight:800">⚠ UNAVAILABLE</div>':current&&currentStatus==="Not sure"?'<div class="cell-note" style="color:#86651a;font-weight:800">? NOT SURE</div>':""}${current&&current.notes?`<div class="cell-note">${escapeHtml(current.notes)}</div>`:""}${allDuties.length>1?`<div class="cell-note">+${allDuties.length-1} additional assignment(s)</div>`:""}</td>`;
       });
       html+='</tr>';
     }
@@ -204,15 +263,13 @@ function renderCalendar(target,y,m,full=false){
   }
   html+="</div>";target.innerHTML=html;
 }
-function setCellDuty(date,branch,staffId){
+async function setCellDuty(date,branch,staffId){
+ if(!isAdmin){alert('Please log in as admin to edit official duty assignments.');renderAll();return}
  const existing=state.duties.filter(d=>d.date===date&&d.branch===branch);
- if(!staffId){if(existing.length&&confirm(`Remove the ${branch} assignment(s) for ${niceDate(date)}?`)){state.duties=state.duties.filter(d=>!(d.date===date&&d.branch===branch));save()}else renderAll();return}
+ if(!staffId){if(existing.length&&confirm(`Remove the ${branch} assignment(s) for ${niceDate(date)}?`)){for(const d of existing)await persistDuty({...d,_delete:true})}else renderAll();return}
  const chosen=state.staff.find(s=>s.id===staffId);if(chosen&&!staffCanWorkAt(chosen,branch)){alert(`${chosen.name} is not marked as available for ${branch}. Update their branch permissions in Staff first.`);renderAll();return}
- const duplicate=state.duties.find(d=>d.date===date&&d.branch===branch&&d.staffId===staffId);
- if(duplicate){renderAll();return}
- if(existing.length){const keep=existing[0];keep.staffId=staffId;keep.notes=keep.notes||"";state.duties=state.duties.filter(d=>!(d.date===date&&d.branch===branch&&d.id!==keep.id));}
- else state.duties.push({id:uid(),date,branch,staffId,notes:""});
- save();
+ const keep=existing[0];const duty={id:keep?.id||uid(),date,branch,staffId,notes:keep?.notes||''};
+ for(const d of existing.slice(1))await persistDuty({...d,_delete:true});await persistDuty(duty);
 }
 function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function renderDashboard(){
@@ -282,9 +339,12 @@ function renderStaff(){
   $("staffCountTag").textContent=`${state.staff.length} staff`;
   $("staffList").innerHTML=state.staff.length?state.staff.map(s=>`<div class="staff-row"><input aria-label="Staff name" value="${escapeHtml(s.name)}" onchange="updateStaff('${s.id}','name',this.value)" /><div class="role-wrap"><select aria-label="Employment type" onchange="updateStaff('${s.id}','type',this.value)"><option ${s.type==="Full-time"?"selected":""}>Full-time</option><option ${s.type==="Part-time"?"selected":""}>Part-time</option></select><div class="smalltext" style="margin-top:4px">Target/week: <input type="number" min="0" max="7" value="${Number(s.target??4)}" style="width:58px;padding:4px" onchange="updateStaff('${s.id}','target',Number(this.value))"></div><div class="smalltext" style="margin-top:6px">Can work at:</div><div class="row" style="gap:5px;margin-top:4px;flex-wrap:wrap">${BRANCHES.map(b=>`<label class="tag" style="display:flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto;margin:0" ${!s.branches||s.branches.includes("ALL")||s.branches.includes(b)?"checked":""} onchange="toggleStaffBranch('${s.id}','${b}',this.checked)"> ${b}</label>`).join("")}<label class="tag" style="display:flex;gap:4px;align-items:center"><input type="checkbox" style="width:auto;margin:0" ${!s.branches||s.branches.includes("ALL")?"checked":""} onchange="toggleAllStaffBranches('${s.id}',this.checked)"> All</label></div></div><button class="small danger" onclick="removeStaff('${s.id}')">Remove</button></div>`).join(""):'<div class="empty">No staff yet. Add staff members using the form.</div>';
 }
-function updateStaff(id,key,value){const s=state.staff.find(x=>x.id===id);if(!s)return;s[key]=value;save()}
-function removeStaff(id){const s=state.staff.find(x=>x.id===id);if(!s)return;if(!confirm(`Remove ${s.name}? Their assigned duties will also be removed.`))return;state.staff=state.staff.filter(x=>x.id!==id);state.duties=state.duties.filter(d=>d.staffId!==id);Object.keys(state.availability).forEach(k=>{if(k.endsWith("|"+id))delete state.availability[k]});save()}
-$("staffForm").addEventListener("submit",e=>{e.preventDefault();const name=$("newStaffName").value.trim();if(!name)return;const all=$("newAllBranches").checked;const chosen=[...document.querySelectorAll(".new-branch-check:checked")].map(c=>c.value);const branches=all||chosen.length===BRANCHES.length?["ALL"]:chosen;if(!branches.length){alert("Choose at least one branch or select All branches.");return}state.staff.push({id:uid(),name,type:$("newStaffType").value,target:Number($("newStaffTarget").value||4),branches});$("newStaffName").value="";save();initNewBranchChecks()});
+async function updateStaffRecord(s){const branches=s.branches?.includes('ALL')?['ALL']:s.branches||[];const {error}=await supabaseClient.from('staff_profiles').update({name:s.name,employment_type:s.type,target_per_week:s.target,branches}).eq('id',s.id);if(error){setCloudStatus('Staff update failed: '+error.message,true);await loadCloudData();return}save();setCloudStatus('Staff details saved to cloud')}
+async function updateStaff(id,key,value){if(!isAdmin)return;const s=state.staff.find(x=>x.id===id);if(!s)return;s[key]=value;await updateStaffRecord(s)}
+async function removeStaff(id){if(!isAdmin){alert('Admin login required.');return}const s=state.staff.find(x=>x.id===id);if(!s)return;if(!confirm(`Remove ${s.name}? Their assigned duties and availability will also be removed.`))return;
+ let r=await supabaseClient.from('duty_assignments').delete().eq('staff_id',id);if(r.error){setCloudStatus(r.error.message,true);return}r=await supabaseClient.from('staff_availability').delete().eq('staff_id',id);if(r.error){setCloudStatus(r.error.message,true);return}r=await supabaseClient.from('staff_profiles').update({active:false}).eq('id',id);if(r.error){setCloudStatus(r.error.message,true);return}await loadCloudData()}
+$("staffForm").addEventListener("submit",async e=>{e.preventDefault();if(!isAdmin){alert('Admin login required to add staff.');return}const name=$("newStaffName").value.trim();if(!name)return;const all=$("newAllBranches").checked;const chosen=[...document.querySelectorAll(".new-branch-check:checked")].map(c=>c.value);const branches=all||chosen.length===BRANCHES.length?['ALL']:chosen;if(!branches.length){alert('Choose at least one branch or select All branches.');return}
+ const {data,error}=await supabaseClient.from('staff_profiles').insert({name,role:'staff',active:true,employment_type:$("newStaffType").value,target_per_week:Number($("newStaffTarget").value||4),branches}).select('id').single();if(error){setCloudStatus('Could not add staff: '+error.message,true);return}$("newStaffName").value='';initNewBranchChecks();await loadCloudData()});
 function renderAvailabilityCalendar(){
  const target=$("availabilityCalendar");if(!target)return;
  const staffId=$("availStaff").value;
@@ -325,7 +385,7 @@ function renderAvailability(){
  const rows=state.staff.map(s=>{const st=state.availability[date+"|"+s.id]||"Not sure";return `<tr><td>${escapeHtml(s.name)}</td><td><span class="tag ${st.toLowerCase().replace(" ","")}">${st}</span></td><td>${state.duties.some(d=>d.date===date&&d.staffId===s.id)?"Already assigned":"No duty assigned"}</td></tr>`}).join("");
  $("availabilitySummary").innerHTML=`<div class="table-wrap"><table><thead><tr><th>Staff</th><th>Status</th><th>Duty on this date</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
-function setAvailability(key,status){state.availability[key]=status;save()}
+async function setAvailability(key,status){state.availability[key]=status;save();const [date,staffId]=key.split("|");await persistAvailability(date,staffId,status)}
 $("availDate").addEventListener("change",renderAvailability);$("availStaff").addEventListener("change",renderAvailability);$("staffCalendarPerson").addEventListener("change",renderStaffCalendar);$("staffCalendarMonth").addEventListener("change",renderStaffCalendar);
 function renderAll(){fillSelectors();renderStaff();renderDashboard();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderAvailability();renderStaffCalendar();if($("relieverResults"))findRelievers(false)}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
@@ -343,12 +403,15 @@ function findRelievers(showEmpty=true){
  $("relieverResults").innerHTML=`<h3>Available and unassigned · ${niceDate(date)} · ${escapeHtml(branch)}</h3>`+(results.length?`<div class="list">${results.map(x=>`<div class="staff-row"><div><strong>${escapeHtml(x.s.name)}</strong><div class="smalltext">${escapeHtml(x.s.type||"")}</div></div><span class="tag available">Available</span><button class="small primary" onclick="assignReliever('${x.s.id}','${date}','${branch}')">Assign</button></div>`).join("")}</div>`:'<div class="empty">No confirmed available staff without another duty on this date.</div>')+(uncertain.length?`<h3 style="margin-top:16px">Needs confirmation</h3><div class="list">${uncertain.map(x=>`<div class="staff-row"><div><strong>${escapeHtml(x.s.name)}</strong><div class="smalltext">No other duty listed</div></div><span class="tag unsure">Not sure</span><button class="small" onclick="confirmAvailability('${x.s.id}','${date}')">Check status</button></div>`).join("")}</div>`:"");
 }
 $("findRelievers").addEventListener("click",()=>findRelievers());$("relieverDate").addEventListener("change",()=>findRelievers(false));$("relieverBranch").addEventListener("change",()=>findRelievers(false));$("replacedStaff").addEventListener("change",()=>findRelievers(false));
-function assignReliever(staffId,date,branch){const chosen=state.staff.find(s=>s.id===staffId);if(chosen&&!staffCanWorkAt(chosen,branch)){alert(`${chosen.name} is not marked as available for ${branch}.`);return}if(!confirm(`Assign ${chosen?.name} to ${branch} on ${niceDate(date)}?`))return;state.duties.push({id:uid(),date,branch,staffId,notes:"Reliever assignment"});save();findRelievers()}
+async function assignReliever(staffId,date,branch){if(!isAdmin){alert("Admin login required to assign duties.");return}const chosen=state.staff.find(s=>s.id===staffId);if(chosen&&!staffCanWorkAt(chosen,branch)){alert(`${chosen.name} is not marked as available for ${branch}.`);return}if(!confirm(`Assign ${chosen?.name} to ${branch} on ${niceDate(date)}?`))return;await persistDuty({id:uid(),date,branch,staffId,notes:"Reliever assignment"});findRelievers()}
 function confirmAvailability(staffId,date){$("availDate").value=date;$("availStaff").value=staffId;goTab("availability");renderAvailability()}
 $("exportBtn").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="buko-shake-duty-planner-backup.json";a.click();URL.revokeObjectURL(a.href)});
 $("importBtn").addEventListener("click",()=>$("importFile").click());
-$("importFile").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{const parsed=JSON.parse(await f.text());if(!Array.isArray(parsed.staff)||!Array.isArray(parsed.duties))throw new Error("Invalid backup");if(!confirm("Restore this backup? It will replace the planner data currently saved in this browser."))return;state={staff:parsed.staff,duties:parsed.duties,availability:parsed.availability||{}};save();alert("Backup restored.")}catch(err){alert("Could not restore this file. Please select a valid planner backup.")}e.target.value=""});
-load();initNewBranchChecks();renderAll();
+$("importFile").addEventListener("change",async e=>{if(!isAdmin){alert("Admin login required to restore data.");e.target.value="";return}const f=e.target.files[0];if(!f)return;try{const parsed=JSON.parse(await f.text());if(!Array.isArray(parsed.staff)||!Array.isArray(parsed.duties))throw new Error("Invalid backup");if(!confirm("Restore this backup? It will replace the planner data currently saved in this browser."))return;state={staff:parsed.staff,duties:parsed.duties,availability:parsed.availability||{}};save();alert("Backup restored.")}catch(err){alert("Could not restore this file. Please select a valid planner backup.")}e.target.value=""});
+initNewBranchChecks();
+$("loginForm").addEventListener("submit",async e=>{e.preventDefault();setCloudStatus('Signing in…');const {error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});if(error){setCloudStatus('Login failed: '+error.message,true);return}await checkAdmin();if(!isAdmin){setCloudStatus('This account is not assigned the admin role.',true);return}$("loginPassword").value='';await loadCloudData();renderAuth()});
+$("cancelLogin").addEventListener("click",()=>$("loginFormWrap").classList.add("hidden"));
+(async()=>{await checkAdmin();await loadCloudData()})();
 </script>
 </body>
 </html>
