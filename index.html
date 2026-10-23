@@ -140,7 +140,7 @@
       <div id="relieverResults" style="margin-top:16px"><div class="empty">Choose a date and branch, then tap “Find available relievers”.</div></div>
     </div>
   </section>
-  <div class="footer">Pinoy Buko Twist Schedule · Test copy · Supabase cloud sync · Admin login required to edit official duties</div>
+  <div class="footer">Pinoy Buko Twist Schedule · Mobile-optimized · Supabase cloud sync · Admin login required to edit official duties</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -155,7 +155,7 @@ const $=id=>document.getElementById(id);
 let viewYear=2026,viewMonth=10,selectedDate="2026-11-01";
 let state={staff:[],duties:[],availability:{}};
 function load(){try{const raw=localStorage.getItem(STORE_KEY);if(raw){const parsed=JSON.parse(raw);state={...state,...parsed};}}catch(e){console.warn("Could not load local backup",e)}}
-function save(){try{localStorage.setItem(STORE_KEY,JSON.stringify(state))}catch(e){} renderAll()}
+function save(options={}){try{localStorage.setItem(STORE_KEY,JSON.stringify(state))}catch(e){} if(options.render!==false)renderAll()}
 function uid(){return crypto.randomUUID()}
 function setCloudStatus(message,isError=false){const el=$("cloudStatus");if(el){el.textContent=message;el.style.color=isError?"#a33f37":""}}
 function renderAuth(){
@@ -170,7 +170,7 @@ async function checkAdmin(){
  renderAuth();return isAdmin;
 }
 async function loadCloudData(){
- setCloudStatus('Loading shared planner data…');
+ setCloudStatus('Syncing latest shared data…');
  const [br,st,du,av]=await Promise.all([
   supabaseClient.from('branches').select('id,name'),
   supabaseClient.from('staff_profiles').select('id,name,employment_type,target_per_week,branches,active,legacy_id').eq('active',true),
@@ -192,7 +192,10 @@ async function persistDuty(duty){
  if(duty._delete){result=await supabaseClient.from('duty_assignments').delete().eq('id',duty.id)}
  else {const row={id:duty.id,duty_date:duty.date,branch_id:branchId,staff_id:duty.staffId,notes:duty.notes||''};result=await supabaseClient.from('duty_assignments').upsert(row,{onConflict:'id'})}
  if(result.error){setCloudStatus('Duty save failed: '+result.error.message,true);await loadCloudData();return false}
- await loadCloudData();return true;
+ // Update the in-memory view locally instead of re-fetching all four tables after every edit.
+ if(duty._delete){state.duties=state.duties.filter(x=>x.id!==duty.id)}
+ else {const clean={id:duty.id,date:duty.date,branch:duty.branch,staffId:duty.staffId,notes:duty.notes||''};const i=state.duties.findIndex(x=>x.id===clean.id);if(i>=0)state.duties[i]=clean;else state.duties.push(clean)}
+ save();setCloudStatus('Duty saved to cloud');return true;
 }
 async function persistAvailability(date,staffId,status){
  const dbStatus=status==='Available'?'available':status==='Unavailable'?'unavailable':'not_sure';
@@ -408,7 +411,10 @@ function confirmAvailability(staffId,date){$("availDate").value=date;$("availSta
 $("exportBtn").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="buko-shake-duty-planner-backup.json";a.click();URL.revokeObjectURL(a.href)});
 $("importBtn").addEventListener("click",()=>$("importFile").click());
 $("importFile").addEventListener("change",async e=>{if(!isAdmin){alert("Admin login required to restore data.");e.target.value="";return}const f=e.target.files[0];if(!f)return;try{const parsed=JSON.parse(await f.text());if(!Array.isArray(parsed.staff)||!Array.isArray(parsed.duties))throw new Error("Invalid backup");if(!confirm("Restore this backup? It will replace the planner data currently saved in this browser."))return;state={staff:parsed.staff,duties:parsed.duties,availability:parsed.availability||{}};save();alert("Backup restored.")}catch(err){alert("Could not restore this file. Please select a valid planner backup.")}e.target.value=""});
+// Paint cached data immediately so the phone shows the planner while cloud requests run.
+load();
 initNewBranchChecks();
+renderAll();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();setCloudStatus('Signing in…');const {error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});if(error){setCloudStatus('Login failed: '+error.message,true);return}await checkAdmin();if(!isAdmin){setCloudStatus('This account is not assigned the admin role.',true);return}$("loginPassword").value='';await loadCloudData();renderAuth()});
 $("cancelLogin").addEventListener("click",()=>$("loginFormWrap").classList.add("hidden"));
 (async()=>{await checkAdmin();await loadCloudData()})();
