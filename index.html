@@ -401,13 +401,18 @@ function renderAvailabilityCalendar(){
  }
  target.innerHTML=out+"</div>";
 }
-function cycleAvailability(date,staffId){
+async function cycleAvailability(date,staffId){
+ if(!dbReady){setCloudStatus('Still connecting to Supabase. Please try again in a moment.',true);return}
+ if(!staffId){setCloudStatus('Please choose a staff member first.',true);return}
  const key=date+"|"+staffId;
  const current=state.availability[key]||"Not sure";
  const next=current==="Not sure"?"Available":current==="Available"?"Unavailable":"Not sure";
  state.availability[key]=next;
  $("availDate").value=date;
  save();
+ setCloudStatus('Saving availability to Supabase…');
+ const saved=await persistAvailability(date,staffId,next);
+ if(saved){save({render:false});renderAvailability();setCloudStatus('Availability saved to cloud ✓')}
 }
 function renderAvailability(){
  const date=$("availDate").value||"2026-11-01",staffId=$("availStaff").value;
