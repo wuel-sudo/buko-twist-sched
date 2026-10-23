@@ -161,10 +161,23 @@ function uid(){return crypto.randomUUID()}
 function setCloudStatus(message,isError=false){const el=$("cloudStatus");if(el){el.textContent=message;el.style.color=isError?"#a33f37":""}}
 function renderAuth(){
  const actions=$("authActions"),wrap=$("loginFormWrap"); if(!actions)return; actions.innerHTML="";
- if(isAdmin){actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';$("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};wrap.classList.add("hidden");}
- else {actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';$("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden")}
+ if(isAdmin){
+  actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';
+  $("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};
+  wrap.classList.add("hidden");
+ } else {
+  actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';
+  $("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden");
+ }
+ // Public navigation is intentionally limited to these three viewable sections.
+ const publicTabs=new Set(["availability","schedule","staffDutyCalendar"]);
+ document.querySelectorAll(".tab").forEach(btn=>{
+  btn.classList.toggle("hidden",!isAdmin&&!publicTabs.has(btn.dataset.tab));
+ });
  document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
- const resetBtn=$('resetDutySchedule');if(resetBtn)resetBtn.classList.toggle('hidden',!isAdmin);
+ const resetBtn=$("resetDutySchedule");if(resetBtn)resetBtn.classList.toggle("hidden",!isAdmin);
+ // Public visitors land directly on Staff Availability; admins retain the overview.
+ goTab(isAdmin?"dashboard":"availability");
 }
 async function checkAdmin(){
  const {data:{session}}=await supabaseClient.auth.getSession();currentUser=session?.user||null;isAdmin=false;
