@@ -73,6 +73,7 @@
       <div class="schedule-tools">
         <div class="field"><label>Schedule month</label><input type="month" id="tableMonth" value="2026-11" ></div>
         <button class="soft" id="exportScheduleCsv" type="button">⬇ Export schedule CSV</button>
+        <button class="danger hidden" id="resetDutySchedule" type="button">↻ Reset duty schedule</button>
       </div>
       <div id="fullCalendar"></div>
       <div class="hint" style="margin-top:12px">Spreadsheet-style view: dates are rows and branches are columns, like your sample. Choose a staff name in a branch cell to assign or change the duty. Use Backup data regularly.</div>
@@ -163,6 +164,7 @@ function renderAuth(){
  if(isAdmin){actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';$("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};wrap.classList.add("hidden");}
  else {actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';$("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden")}
  document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
+ const resetBtn=$('resetDutySchedule');if(resetBtn)resetBtn.classList.toggle('hidden',!isAdmin);
 }
 async function checkAdmin(){
  const {data:{session}}=await supabaseClient.auth.getSession();currentUser=session?.user||null;isAdmin=false;
@@ -197,6 +199,24 @@ async function persistDuty(duty){
  else {const clean={id:duty.id,date:duty.date,branch:duty.branch,staffId:duty.staffId,notes:duty.notes||''};const i=state.duties.findIndex(x=>x.id===clean.id);if(i>=0)state.duties[i]=clean;else state.duties.push(clean)}
  save();setCloudStatus('Duty saved to cloud');return true;
 }
+async function resetDutySchedule(){
+ if(!isAdmin){alert('Admin login required to reset the duty schedule.');return}
+ if(!dbReady){alert('Cloud data is still loading. Please try again in a moment.');return}
+ const confirmed=confirm('RESET DUTY SCHEDULE?\n\nThis will permanently delete ALL duty assignments from Supabase for every date and branch. Staff availability, staff accounts, branches, and settings will remain unchanged. This cannot be undone. Continue?');
+ if(!confirmed)return;
+ const btn=$('resetDutySchedule');if(btn)btn.disabled=true;
+ setCloudStatus('Resetting duty assignments in Supabase…');
+ try{
+  const {error}=await supabaseClient.from('duty_assignments').delete().not('id','is',null);
+  if(error){setCloudStatus('Reset failed: '+error.message,true);alert('Reset failed. No success was reported.\n\n'+error.message);return}
+  state.duties=[];
+  save();
+  setCloudStatus('Duty schedule reset · availability and staff data kept');
+  alert('Duty schedule reset successfully. All duty assignments were removed from Supabase. Staff availability, accounts, branches, and settings were kept.');
+ }catch(err){setCloudStatus('Reset failed: '+(err?.message||'Unknown error'),true);alert('Reset failed: '+(err?.message||'Unknown error'))}
+ finally{if(btn)btn.disabled=!isAdmin}
+}
+$('resetDutySchedule').addEventListener('click',resetDutySchedule);
 async function persistAvailability(date,staffId,status){
  const dbStatus=status==='Available'?'available':status==='Unavailable'?'unavailable':'not_sure';
  const {error}=await supabaseClient.from('staff_availability').upsert({staff_id:staffId,availability_date:date,status:dbStatus},{onConflict:'staff_id,availability_date'});
@@ -368,24 +388,13 @@ function renderAvailabilityCalendar(){
  }
  target.innerHTML=out+"</div>";
 }
-async function cycleAvailability(date,staffId){
- if(!dbReady){
-  setCloudStatus("Still connecting to the cloud. Please try again in a moment.",true);
-  return;
- }
+function cycleAvailability(date,staffId){
  const key=date+"|"+staffId;
  const current=state.availability[key]||"Not sure";
  const next=current==="Not sure"?"Available":current==="Available"?"Unavailable":"Not sure";
  state.availability[key]=next;
  $("availDate").value=date;
- renderAvailability();
- setCloudStatus("Saving availability…");
- const saved=await persistAvailability(date,staffId,next);
- if(saved){
-  save({render:false});
-  renderAvailability();
-  setCloudStatus("Availability saved to cloud ✓");
- }
+ save();
 }
 function renderAvailability(){
  const date=$("availDate").value||"2026-11-01",staffId=$("availStaff").value;
