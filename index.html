@@ -502,12 +502,12 @@ function changeAdminTally(id,delta){
 function updateAdminTallyVisibility(){
  const toggle=$("adminTallyToggle"),panel=$("adminTallyPanel");
  if(!toggle||!panel)return;
- toggle.style.display=isAdmin?"block":"none";
+ toggle.style.display=(isAdmin && panel.style.display!=="block")?"block":"none";
  if(!isAdmin)panel.style.display="none";
  renderAdminTally();
 }
-$("adminTallyToggle").addEventListener("click",()=>{$("adminTallyPanel").style.display=$("adminTallyPanel").style.display==="block"?"none":"block";renderAdminTally()});
-$("closeAdminTally").addEventListener("click",()=>{$("adminTallyPanel").style.display="none"});
+$("adminTallyToggle").addEventListener("click",()=>{const panel=$("adminTallyPanel"),toggle=$("adminTallyToggle");panel.style.display=panel.style.display==="block"?"none":"block";toggle.style.display=panel.style.display==="block"?"none":(isAdmin?"block":"none");renderAdminTally()});
+$("closeAdminTally").addEventListener("click",()=>{$("adminTallyPanel").style.display="none";$("adminTallyToggle").style.display=isAdmin?"block":"none"});
 $("adminTallyUndo").addEventListener("click",()=>{if(!isAdmin)return;const id=adminTallyHistory.pop();if(id)adminTallyCounts[id]=Math.max(0,(adminTallyCounts[id]||0)-1);renderAdminTally()});
 $("adminTallyReset").addEventListener("click",()=>{if(!isAdmin)return;if(confirm("Reset all manual tally counts? This will not change the duty schedule.")){Object.keys(adminTallyCounts).forEach(k=>delete adminTallyCounts[k]);adminTallyHistory.length=0;renderAdminTally()}});
 
