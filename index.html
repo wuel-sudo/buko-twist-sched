@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#e8f3e8">
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <title>Pinoy Buko Twist Schedule</title>
 <style>
 :root{--bg:#f5f8f2;--card:#fff;--ink:#25382b;--muted:#68796d;--green:#4e8060;--green2:#dcebdc;--mint:#edf5eb;--line:#dce6da;--rose:#f8e6e2;--yellow:#fbf1d5;--blue:#e6eff8;--shadow:0 8px 24px #294b3010}
@@ -73,6 +74,7 @@
       <div class="schedule-tools">
         <div class="field"><label>Schedule month</label><input type="month" id="tableMonth" value="2026-11" ></div>
         <button class="soft" id="exportScheduleCsv" type="button">⬇ Export schedule CSV</button>
+        <button class="primary" id="exportDutyPng" type="button">▣ Export Duty Calendar Image</button>
         <button class="danger hidden" id="resetDutySchedule" type="button">↻ Reset duty schedule</button>
       </div>
       <div id="fullCalendar"></div>
@@ -127,6 +129,7 @@
       <div class="form-grid" style="max-width:650px;margin-bottom:14px">
         <div class="field"><label>Choose staff member</label><select id="staffCalendarPerson"></select></div>
         <div class="field"><label>Calendar month</label><input type="month" id="staffCalendarMonth" value="2026-11" ></div>
+        <div class="wide"><button class="primary" id="exportStaffPng" type="button">▣ Export Staff Calendar Image</button></div>
       </div>
       <div id="staffCalendar"></div>
     </div>
@@ -463,6 +466,27 @@ function renderAvailability(){
 async function setAvailability(key,status){state.availability[key]=status;save();const [date,staffId]=key.split("|");await persistAvailability(date,staffId,status)}
 $("availDate").addEventListener("change",renderAvailability);$("availStaff").addEventListener("change",renderAvailability);$("staffCalendarPerson").addEventListener("change",renderStaffCalendar);$("staffCalendarMonth").addEventListener("change",renderStaffCalendar);
 function renderAll(){fillSelectors();renderStaff();renderDashboard();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderAvailability();renderStaffCalendar();if($("relieverResults"))findRelievers(false)}
+async function exportCalendarAsPng(sourceId,title,filename,subtitle=""){
+ const source=$(sourceId);
+ if(!source||!source.innerHTML.trim()){alert("There is no calendar content to export yet.");return}
+ if(typeof window.html2canvas!=="function"){alert("Image export library did not load. Check your internet connection, then refresh the page and try again.");return}
+ const exportRoot=document.createElement("div");
+ exportRoot.style.cssText="position:fixed;left:-20000px;top:0;z-index:-1;background:#ffffff;color:#25382b;padding:24px;width:max-content;max-width:none;font-family:Arial,sans-serif;";
+ const heading=document.createElement("h1");heading.textContent=title;heading.style.cssText="font-size:24px;margin:0 0 5px;color:#25382b;";exportRoot.appendChild(heading);
+ if(subtitle){const sub=document.createElement("p");sub.textContent=subtitle;sub.style.cssText="font-size:13px;margin:0 0 18px;color:#68796d;";exportRoot.appendChild(sub)}
+ const clone=source.cloneNode(true);clone.style.width="max-content";clone.style.maxWidth="none";clone.style.overflow="visible";
+ clone.querySelectorAll(".schedule-table-wrap,.table-wrap").forEach(el=>{el.style.overflow="visible";el.style.width="max-content";el.style.maxWidth="none"});
+ clone.querySelectorAll("select").forEach(sel=>{const span=document.createElement("span");span.textContent=sel.selectedOptions?.[0]?.textContent||"—";span.style.cssText="display:block;padding:8px;font-size:13px;min-width:130px;white-space:normal;color:#25382b;";sel.replaceWith(span)});
+ clone.querySelectorAll("button,input,textarea,.schedule-row-actions").forEach(el=>el.remove());
+ clone.querySelectorAll(".hidden").forEach(el=>el.remove());
+ exportRoot.appendChild(clone);document.body.appendChild(exportRoot);
+ try{
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const canvas=await window.html2canvas(exportRoot,{backgroundColor:"#ffffff",scale:2,useCORS:true,logging:false,windowWidth:Math.max(document.documentElement.clientWidth,exportRoot.scrollWidth),width:exportRoot.scrollWidth,height:exportRoot.scrollHeight,scrollX:0,scrollY:0});
+   const link=document.createElement("a");link.download=filename;link.href=canvas.toDataURL("image/png");link.click();
+ }catch(err){console.error("PNG export failed",err);alert("Hindi na-export ang image. Subukan ulit, o tingnan kung pinapayagan ng browser ang downloads.")}
+ finally{exportRoot.remove()}
+}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
 $("nextMonth").addEventListener("click",()=>{viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++}renderAll()});
 $("thisMonth").addEventListener("click",()=>{viewYear=2026;viewMonth=10;renderAll()});
@@ -470,6 +494,18 @@ $("branchFilter").addEventListener("change",()=>renderCalendar($("fullCalendar")
 $("tableMonth").addEventListener("change",()=>{const v=$("tableMonth").value;if(!v)return;viewYear=Number(v.slice(0,4));viewMonth=Number(v.slice(5,7))-1;if($("dashboardMonth"))$("dashboardMonth").value=v;renderAll()});
 $("dashboardMonth").addEventListener("change",()=>{renderDashboard()});
 $("exportScheduleCsv").addEventListener("click",()=>{const prefix=$("tableMonth").value||"2026-11";const [yy,mm]=prefix.split("-").map(Number);const days=new Date(yy,mm,0).getDate();const rows=[["Date",...BRANCHES]];for(let day=1;day<=days;day++){const iso=dateISO(yy,mm-1,day);rows.push([String(day).padStart(2,"0"),...BRANCHES.map(b=>{const d=state.duties.find(x=>x.date===iso&&x.branch===b);return state.staff.find(s=>s.id===d?.staffId)?.name||""})])}const csv=rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(",")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`buko-shake-schedule-${prefix}.csv`;a.click();URL.revokeObjectURL(a.href)});
+$("exportDutyPng").addEventListener("click",()=>{
+ const month=$("tableMonth").value||`${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
+ const [yy,mm]=month.split("-").map(Number);
+ exportCalendarAsPng("fullCalendar",`Pinoy Buko Twist Schedule — Duty Calendar`, `buko-duty-calendar-${month}.png`,`${monthName(yy,mm-1)} · Puregold · Ramrod · Ilwas · Baraca`);
+});
+$("exportStaffPng").addEventListener("click",()=>{
+ const staffId=$("staffCalendarPerson").value;
+ if(!staffId){alert("Piliin muna kung sinong staff ang ie-export.");return}
+ const staff=state.staff.find(x=>x.id===staffId);const month=$("staffCalendarMonth").value||"2026-11";
+ const [yy,mm]=month.split("-").map(Number);
+ exportCalendarAsPng("staffCalendar",`${staff?.name||"Staff"} — Duty Calendar`, `staff-duty-calendar-${(staff?.name||"staff").toLowerCase().replace(/[^a-z0-9]+/g,"-")}-${month}.png`,monthName(yy,mm-1));
+});
 function findRelievers(showEmpty=true){
  const date=$("relieverDate").value||"2026-11-01",branch=$("relieverBranch").value||BRANCHES[0],replaced=$("replacedStaff").value;
  if(!state.staff.length){$("relieverResults").innerHTML='<div class="empty">Add staff members first.</div>';return}
