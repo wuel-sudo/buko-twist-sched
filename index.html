@@ -324,7 +324,24 @@ async function exportElementPng(elementId,filename){
  if(!window.html2canvas){alert("The image library did not load. Please check your internet connection and try again.");return}
  const oldBg=el.style.backgroundColor;el.style.backgroundColor="#ffffff";
  try{
-  const canvas=await html2canvas(el,{backgroundColor:"#ffffff",scale:Math.min(2,window.devicePixelRatio||1),useCORS:true,logging:false,scrollX:0,scrollY:-window.scrollY});
+  // Render a desktop-width snapshot even when the app is opened on a narrow phone.
+  // This prevents calendar pills/labels from colliding or being clipped in the PNG.
+  const canvas=await html2canvas(el,{
+   backgroundColor:"#ffffff",scale:2,useCORS:true,logging:false,scrollX:0,scrollY:0,
+   windowWidth:1200,
+   onclone:(doc)=>{
+    const copy=doc.getElementById(elementId); if(!copy)return;
+    copy.style.width="1100px"; copy.style.maxWidth="none"; copy.style.overflow="visible";
+    copy.style.boxSizing="border-box"; copy.style.padding="16px"; copy.style.backgroundColor="#ffffff";
+    copy.querySelectorAll(".calendar").forEach(cal=>{cal.style.width="1060px";cal.style.minWidth="1060px";cal.style.gridTemplateColumns="repeat(7,minmax(0,1fr))";cal.style.overflow="visible"});
+    copy.querySelectorAll(".day").forEach(day=>{day.style.minHeight="115px";day.style.height="auto";day.style.padding="8px";day.style.overflow="visible"});
+    copy.querySelectorAll(".duty-pill").forEach(pill=>{pill.style.fontSize="12px";pill.style.lineHeight="1.35";pill.style.padding="5px 7px";pill.style.whiteSpace="normal";pill.style.overflowWrap="anywhere";pill.style.wordBreak="normal";pill.style.height="auto";pill.style.maxWidth="100%"});
+    copy.querySelectorAll(".table-wrap,.schedule-table-wrap").forEach(wrap=>{wrap.style.overflow="visible";wrap.style.width="100%"});
+    copy.querySelectorAll(".schedule-table,table").forEach(table=>{table.style.width="1060px";table.style.minWidth="1060px";table.style.tableLayout="fixed"});
+    copy.querySelectorAll("th,td").forEach(cell=>{cell.style.whiteSpace="normal";cell.style.overflowWrap="anywhere";cell.style.padding="8px"});
+    copy.querySelectorAll(".tag.available,.tag.unavailable,.tag.unsure,.conflict-label").forEach(label=>{label.style.display="inline-block";label.style.maxWidth="100%";label.style.whiteSpace="normal";label.style.overflowWrap="anywhere";label.style.fontSize="11px"});
+   }
+  });
   const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error("Could not create image file")),"image/png"));
   showDownloadReady(blob,filename);
  }catch(e){console.error(e);alert("Could not prepare the calendar image. Please try again, or check your phone's internet connection.")}
