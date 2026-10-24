@@ -76,7 +76,11 @@
         <button class="danger hidden" id="resetDutySchedule" type="button">↻ Reset duty schedule</button>
       </div>
       <div id="fullCalendar"></div>
-      <div class="hint" style="margin-top:12px">Spreadsheet-style view: dates are rows and branches are columns, like your sample. Choose a staff name in a branch cell to assign or change the duty. Use Backup data regularly.</div>
+      <div class="card" id="weeklyDutyCountCard" style="margin-top:14px;box-shadow:none">
+        <div class="calendar-head"><div><h2>Weekly Duty Count</h2><div class="smalltext">Automatic count based on actual assigned duty dates · Weeks run Sunday to Saturday.</div></div></div>
+        <div id="weeklyDutyCounts"></div>
+      </div>
+      <div class="hint" style="margin-top:12px">Spreadsheet-style view: dates are rows and branches are columns, like your sample. Choose a staff name in a branch cell to assign or change the duty. Weekly counts update automatically when duty assignments change.</div>
     </div>
 
   </section>
@@ -278,6 +282,7 @@ function renderCalendar(target,y,m,full=false){
     }
     html+='</tbody></table></div>';
     target.innerHTML=html;
+    renderWeeklyDutyCounts(y,m);
     return;
   }
   const first=new Date(y,m,1),start=first.getDay(),days=new Date(y,m+1,0).getDate(),prevDays=new Date(y,m,0).getDate();
@@ -299,6 +304,35 @@ function renderCalendar(target,y,m,full=false){
   }
   html+="</div>";target.innerHTML=html;
 }
+function renderWeeklyDutyCounts(year, monthIndex){
+ const target=$("weeklyDutyCounts");
+ if(!target)return;
+ if(!state.staff.length){target.innerHTML='<div class="empty">Add staff members to see weekly duty counts.</div>';return;}
+ const firstOfMonth=new Date(year,monthIndex,1);
+ const lastOfMonth=new Date(year,monthIndex+1,0);
+ const start=new Date(year,monthIndex,1-firstOfMonth.getDay()); // Sunday at start of first displayed week
+ const weeks=[];
+ for(let cursor=new Date(start);cursor<=lastOfMonth;cursor.setDate(cursor.getDate()+7)){
+  const weekStart=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate());
+  const weekEnd=new Date(weekStart);weekEnd.setDate(weekEnd.getDate()+6);
+  const iso=(d)=>dateISO(d.getFullYear(),d.getMonth(),d.getDate());
+  const from=iso(weekStart),to=iso(weekEnd);
+  const rows=state.staff.map(staff=>{
+   const uniqueDates=new Set(state.duties.filter(d=>d.staffId===staff.id&&d.date>=from&&d.date<=to).map(d=>d.date));
+   const count=uniqueDates.size;
+   const goal=Number(staff.target??4);
+   return {name:staff.name,count,goal,remaining:Math.max(0,goal-count)};
+  }).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name));
+  weeks.push({from,to,label:`${niceDate(from,{month:'short',day:'numeric'})} – ${niceDate(to,{month:'short',day:'numeric',year:'numeric'})}`,rows});
+ }
+ target.innerHTML=weeks.map((week,index)=>`<div style="margin-top:${index?14:0}px">
+  <h3 style="margin:0 0 8px">Week ${index+1}: ${week.label}</h3>
+  <div class="table-wrap"><table><thead><tr><th>Staff</th><th>Duty days</th><th>Target / week</th><th>Remaining to target</th></tr></thead><tbody>
+  ${week.rows.map(r=>`<tr><td>${escapeHtml(r.name)}</td><td><strong>${r.count}</strong></td><td>${r.goal}</td><td>${r.remaining}</td></tr>`).join('')}
+  </tbody></table></div>
+ </div>`).join('');
+}
+
 async function setCellDuty(date,branch,staffId){
  if(!isAdmin){alert('Please log in as admin to edit official duty assignments.');renderAll();return}
  const existing=state.duties.filter(d=>d.date===date&&d.branch===branch);
