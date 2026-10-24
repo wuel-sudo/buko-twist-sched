@@ -162,6 +162,7 @@ function uid(){return crypto.randomUUID()}
 function setCloudStatus(message,isError=false){const el=$("cloudStatus");if(el){el.textContent=message;el.style.color=isError?"#a33f37":""}}
 function renderAuth(){
  const actions=$("authActions"),wrap=$("loginFormWrap"); if(!actions)return; actions.innerHTML="";
+ if(typeof updateResetDutyButton==="function")updateResetDutyButton();
  if(isAdmin){actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';$("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};wrap.classList.add("hidden");}
  else {actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';$("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden")}
  document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
