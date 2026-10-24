@@ -72,7 +72,7 @@
       <div class="row" style="margin-bottom:10px"><div class="field" style="max-width:220px;flex:1"><label>Filter by branch</label><select id="branchFilter"></select></div><div class="field" style="max-width:220px;flex:1"><label>Filter by staff</label><select id="staffFilter"></select></div></div>
       <div class="schedule-tools">
         <div class="field"><label>Schedule month</label><input type="month" id="tableMonth" value="2026-11" ></div>
-        <button class="soft" id="exportScheduleCsv" type="button">⬇ Download schedule CSV</button><button class="soft" id="exportDutyPng" type="button">⬇ Download Duty Calendar</button>
+        <button class="soft" id="exportScheduleCsv" type="button">⬇ Download schedule CSV</button><button class="soft" id="exportDutyPng" type="button">⬇ Download Duty Calendar</button><button class="danger" id="resetDutySchedule" type="button" style="display:none">↻ Reset duty schedule</button>
       </div>
       <div id="fullCalendar"></div>
       <div class="card" style="margin-top:14px;box-shadow:none" id="weeklyDutyCounts"><h2>Weekly duty count</h2><div id="weeklyDutyCountContent"></div></div>
@@ -460,6 +460,24 @@ $("thisMonth").addEventListener("click",()=>{viewYear=2026;viewMonth=10;renderAl
 $("branchFilter").addEventListener("change",()=>renderCalendar($("fullCalendar"),viewYear,viewMonth,true));$("staffFilter").addEventListener("change",()=>renderCalendar($("fullCalendar"),viewYear,viewMonth,true));
 $("tableMonth").addEventListener("change",()=>{const v=$("tableMonth").value;if(!v)return;viewYear=Number(v.slice(0,4));viewMonth=Number(v.slice(5,7))-1;if($("dashboardMonth"))$("dashboardMonth").value=v;renderAll()});
 $("dashboardMonth").addEventListener("change",()=>{renderDashboard()});
+const resetDutyButton=$("resetDutySchedule");
+function updateResetDutyButton(){if(resetDutyButton)resetDutyButton.style.display=isAdmin?"inline-flex":"none"}
+resetDutyButton?.addEventListener("click",async()=>{
+ if(!isAdmin){alert("Admin login required to reset the duty schedule.");return}
+ const month=$("tableMonth").value||"2026-11";
+ if(!confirm(`Reset ALL duty assignments for every month? This will NOT delete staff, branch settings, or availability.`))return;
+ resetDutyButton.disabled=true;resetDutyButton.textContent="Resetting…";
+ try{
+  const {error}=await supabaseClient.from("duty_assignments").delete().not("id","is",null);
+  if(error)throw error;
+  state.duties=[];save();
+  setCloudStatus("Duty schedule reset. Staff availability and settings were preserved.");
+  alert("Duty assignments cleared. Staff, availability, accounts, branches, and settings were kept.");
+ }catch(err){
+  console.error(err);setCloudStatus("Could not reset duty schedule: "+(err.message||"Unknown error"),true);
+  alert("Could not reset the duty schedule. No local changes were made. Check the cloud status and try again.");
+ }finally{resetDutyButton.disabled=false;resetDutyButton.textContent="↻ Reset duty schedule";updateResetDutyButton()}
+});
 $("exportScheduleCsv").addEventListener("click",()=>{const prefix=$("tableMonth").value||"2026-11";const [yy,mm]=prefix.split("-").map(Number);const days=new Date(yy,mm,0).getDate();const rows=[["Date",...BRANCHES]];for(let day=1;day<=days;day++){const iso=dateISO(yy,mm-1,day);rows.push([String(day).padStart(2,"0"),...BRANCHES.map(b=>{const d=state.duties.find(x=>x.date===iso&&x.branch===b);return state.staff.find(s=>s.id===d?.staffId)?.name||""})])}const csv=rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(",")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`buko-shake-schedule-${prefix}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000)});
 $("exportDutyPng").addEventListener("click",()=>exportElementPng("fullCalendar",`buko-duty-calendar-${$("tableMonth").value||"2026-11"}.png`));
 $("exportStaffPng").addEventListener("click",()=>{const staff=state.staff.find(s=>s.id===$("staffCalendarPerson").value);if(!staff){alert("Choose a staff member first.");return}const month=$("staffCalendarMonth").value||"2026-11";exportElementPng("staffCalendar",`staff-calendar-${staff.name.replace(/[^a-z0-9]+/gi,"-")}-${month}.png`)});
