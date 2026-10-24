@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#e8f3e8">
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <title>Pinoy Buko Twist Schedule</title>
 <style>
 :root{--bg:#f5f8f2;--card:#fff;--ink:#25382b;--muted:#68796d;--green:#4e8060;--green2:#dcebdc;--mint:#edf5eb;--line:#dce6da;--rose:#f8e6e2;--yellow:#fbf1d5;--blue:#e6eff8;--shadow:0 8px 24px #294b3010}
@@ -73,16 +72,11 @@
       <div class="row" style="margin-bottom:10px"><div class="field" style="max-width:220px;flex:1"><label>Filter by branch</label><select id="branchFilter"></select></div><div class="field" style="max-width:220px;flex:1"><label>Filter by staff</label><select id="staffFilter"></select></div></div>
       <div class="schedule-tools">
         <div class="field"><label>Schedule month</label><input type="month" id="tableMonth" value="2026-11" ></div>
-        <button class="soft" id="exportScheduleCsv" type="button">⬇ Export schedule CSV</button>
-        <button class="primary" id="exportDutyPng" type="button">▣ Export Duty Calendar Image</button>
-        <button class="danger hidden" id="resetDutySchedule" type="button">↻ Reset duty schedule</button>
+        <button class="soft" id="exportScheduleCsv" type="button">⬇ Export schedule CSV</button><button class="soft" id="exportDutyPng" type="button">🖼 Export Duty Calendar PNG</button>
       </div>
       <div id="fullCalendar"></div>
-      <div class="card" id="weeklyDutyCountCard" style="margin-top:14px;box-shadow:none">
-        <div class="calendar-head"><div><h2>Weekly Duty Count</h2><div class="smalltext">Automatic count based on actual assigned duty dates · Weeks run Sunday to Saturday.</div></div></div>
-        <div id="weeklyDutyCounts"></div>
-      </div>
-      <div class="hint" style="margin-top:12px">Spreadsheet-style view: dates are rows and branches are columns, like your sample. Choose a staff name in a branch cell to assign or change the duty. Weekly counts update automatically when duty assignments change.</div>
+      <div class="card" style="margin-top:14px;box-shadow:none" id="weeklyDutyCounts"><h2>Weekly duty count</h2><div id="weeklyDutyCountContent"></div></div>
+      <div class="hint" style="margin-top:12px">Spreadsheet-style view: dates are rows and branches are columns, like your sample. Choose a staff name in a branch cell to assign or change the duty. Use Backup data regularly.</div>
     </div>
 
   </section>
@@ -129,9 +123,8 @@
       <div class="form-grid" style="max-width:650px;margin-bottom:14px">
         <div class="field"><label>Choose staff member</label><select id="staffCalendarPerson"></select></div>
         <div class="field"><label>Calendar month</label><input type="month" id="staffCalendarMonth" value="2026-11" ></div>
-        <div class="wide"><button class="primary" id="exportStaffPng" type="button">▣ Export Staff Calendar Image</button></div>
       </div>
-      <div id="staffCalendar"></div>
+      <div class="row" style="margin-bottom:12px"><button class="soft" id="exportStaffPng" type="button">🖼 Export Staff Calendar PNG</button></div><div id="staffCalendar"></div>
     </div>
   </section>
 
@@ -151,6 +144,7 @@
   <div class="footer">Pinoy Buko Twist Schedule · Mobile-optimized · Supabase cloud sync · Admin login required to edit official duties</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 const BRANCHES=["Puregold","Ramrod","Ilwas","Baraca"];
 const BRANCH_CLASS={"Puregold":"puregold","Ramrod":"ramrod","Ilwas":"ilwas","Baraca":"baraca"};
@@ -168,28 +162,14 @@ function uid(){return crypto.randomUUID()}
 function setCloudStatus(message,isError=false){const el=$("cloudStatus");if(el){el.textContent=message;el.style.color=isError?"#a33f37":""}}
 function renderAuth(){
  const actions=$("authActions"),wrap=$("loginFormWrap"); if(!actions)return; actions.innerHTML="";
- if(isAdmin){
-  actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';
-  $("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};
-  wrap.classList.add("hidden");
- } else {
-  actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';
-  $("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden");
- }
- // Public navigation is intentionally limited to these three viewable sections.
- const publicTabs=new Set(["availability","schedule","staffDutyCalendar"]);
- document.querySelectorAll(".tab").forEach(btn=>{
-  btn.classList.toggle("hidden",!isAdmin&&!publicTabs.has(btn.dataset.tab));
- });
+ if(isAdmin){actions.innerHTML='<span class="tag available">Admin mode</span><button type="button" id="logoutBtn">Log out</button>';$("logoutBtn").onclick=async()=>{await supabaseClient.auth.signOut();currentUser=null;isAdmin=false;renderAuth();await loadCloudData()};wrap.classList.add("hidden");}
+ else {actions.innerHTML='<span class="tag">Public view</span><button type="button" id="showLoginBtn">Admin login</button>';$("showLoginBtn").onclick=()=>wrap.classList.toggle("hidden")}
  document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
- const resetBtn=$("resetDutySchedule");if(resetBtn)resetBtn.classList.toggle("hidden",!isAdmin);
- // Public visitors land directly on Staff Availability; admins retain the overview.
- goTab(isAdmin?"dashboard":"availability");
 }
 async function checkAdmin(){
  const {data:{session}}=await supabaseClient.auth.getSession();currentUser=session?.user||null;isAdmin=false;
  if(currentUser){const {data,error}=await supabaseClient.from('staff_profiles').select('role,active').eq('auth_user_id',currentUser.id).maybeSingle();if(!error&&data&&data.role==='admin'&&data.active===true)isAdmin=true;else await supabaseClient.auth.signOut().catch(()=>{});}
- renderAuth();return isAdmin;
+ renderAuth();updatePublicNavigation();return isAdmin;
 }
 async function loadCloudData(){
  setCloudStatus('Syncing latest shared data…');
@@ -219,24 +199,6 @@ async function persistDuty(duty){
  else {const clean={id:duty.id,date:duty.date,branch:duty.branch,staffId:duty.staffId,notes:duty.notes||''};const i=state.duties.findIndex(x=>x.id===clean.id);if(i>=0)state.duties[i]=clean;else state.duties.push(clean)}
  save();setCloudStatus('Duty saved to cloud');return true;
 }
-async function resetDutySchedule(){
- if(!isAdmin){alert('Admin login required to reset the duty schedule.');return}
- if(!dbReady){alert('Cloud data is still loading. Please try again in a moment.');return}
- const confirmed=confirm('RESET DUTY SCHEDULE?\n\nThis will permanently delete ALL duty assignments from Supabase for every date and branch. Staff availability, staff accounts, branches, and settings will remain unchanged. This cannot be undone. Continue?');
- if(!confirmed)return;
- const btn=$('resetDutySchedule');if(btn)btn.disabled=true;
- setCloudStatus('Resetting duty assignments in Supabase…');
- try{
-  const {error}=await supabaseClient.from('duty_assignments').delete().not('id','is',null);
-  if(error){setCloudStatus('Reset failed: '+error.message,true);alert('Reset failed. No success was reported.\n\n'+error.message);return}
-  state.duties=[];
-  save();
-  setCloudStatus('Duty schedule reset · availability and staff data kept');
-  alert('Duty schedule reset successfully. All duty assignments were removed from Supabase. Staff availability, accounts, branches, and settings were kept.');
- }catch(err){setCloudStatus('Reset failed: '+(err?.message||'Unknown error'),true);alert('Reset failed: '+(err?.message||'Unknown error'))}
- finally{if(btn)btn.disabled=!isAdmin}
-}
-$('resetDutySchedule').addEventListener('click',resetDutySchedule);
 async function persistAvailability(date,staffId,status){
  const dbStatus=status==='Available'?'available':status==='Unavailable'?'unavailable':'not_sure';
  const {error}=await supabaseClient.from('staff_availability').upsert({staff_id:staffId,availability_date:date,status:dbStatus},{onConflict:'staff_id,availability_date'});
@@ -255,7 +217,11 @@ function fillSelectors(){
   setOptions($("staffFilter"),[{value:"",label:"All staff"},...staff]);
   setOptions($("replacedStaff"),[{value:"",label:"No specific staff"},...staff]);
 }
-function goTab(tab){document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id===tab));if(tab==="schedule")renderCalendar($("fullCalendar"),viewYear,viewMonth,true);if(tab==="availability")renderAvailability();if(tab==="staffDutyCalendar")renderStaffCalendar();if(tab==="reliever")findRelievers()}
+function updatePublicNavigation(){
+ document.querySelectorAll('.tab[data-tab="staff"],.tab[data-tab="reliever"]').forEach(el=>el.classList.toggle('hidden',!isAdmin));
+ document.querySelectorAll('.tab[data-tab="dashboard"]').forEach(el=>el.classList.toggle('hidden',!isAdmin));
+}
+function goTab(tab){if(!isAdmin&&["staff","reliever","dashboard"].includes(tab))tab="availability";document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id===tab));if(tab==="schedule")renderCalendar($("fullCalendar"),viewYear,viewMonth,true);if(tab==="availability")renderAvailability();if(tab==="staffDutyCalendar")renderStaffCalendar();if(tab==="reliever")findRelievers()}
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>goTab(b.dataset.tab)));
 function renderCalendar(target,y,m,full=false){
   if(!target)return;
@@ -285,7 +251,6 @@ function renderCalendar(target,y,m,full=false){
     }
     html+='</tbody></table></div>';
     target.innerHTML=html;
-    renderWeeklyDutyCounts(y,m);
     return;
   }
   const first=new Date(y,m,1),start=first.getDay(),days=new Date(y,m+1,0).getDate(),prevDays=new Date(y,m,0).getDate();
@@ -307,35 +272,6 @@ function renderCalendar(target,y,m,full=false){
   }
   html+="</div>";target.innerHTML=html;
 }
-function renderWeeklyDutyCounts(year, monthIndex){
- const target=$("weeklyDutyCounts");
- if(!target)return;
- if(!state.staff.length){target.innerHTML='<div class="empty">Add staff members to see weekly duty counts.</div>';return;}
- const firstOfMonth=new Date(year,monthIndex,1);
- const lastOfMonth=new Date(year,monthIndex+1,0);
- const start=new Date(year,monthIndex,1-firstOfMonth.getDay()); // Sunday at start of first displayed week
- const weeks=[];
- for(let cursor=new Date(start);cursor<=lastOfMonth;cursor.setDate(cursor.getDate()+7)){
-  const weekStart=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate());
-  const weekEnd=new Date(weekStart);weekEnd.setDate(weekEnd.getDate()+6);
-  const iso=(d)=>dateISO(d.getFullYear(),d.getMonth(),d.getDate());
-  const from=iso(weekStart),to=iso(weekEnd);
-  const rows=state.staff.map(staff=>{
-   const uniqueDates=new Set(state.duties.filter(d=>d.staffId===staff.id&&d.date>=from&&d.date<=to).map(d=>d.date));
-   const count=uniqueDates.size;
-   const goal=Number(staff.target??4);
-   return {name:staff.name,count,goal,remaining:Math.max(0,goal-count)};
-  }).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name));
-  weeks.push({from,to,label:`${niceDate(from,{month:'short',day:'numeric'})} – ${niceDate(to,{month:'short',day:'numeric',year:'numeric'})}`,rows});
- }
- target.innerHTML=weeks.map((week,index)=>`<div style="margin-top:${index?14:0}px">
-  <h3 style="margin:0 0 8px">Week ${index+1}: ${week.label}</h3>
-  <div class="table-wrap"><table><thead><tr><th>Staff</th><th>Duty days</th><th>Target / week</th><th>Remaining to target</th></tr></thead><tbody>
-  ${week.rows.map(r=>`<tr><td>${escapeHtml(r.name)}</td><td><strong>${r.count}</strong></td><td>${r.goal}</td><td>${r.remaining}</td></tr>`).join('')}
-  </tbody></table></div>
- </div>`).join('');
-}
-
 async function setCellDuty(date,branch,staffId){
  if(!isAdmin){alert('Please log in as admin to edit official duty assignments.');renderAll();return}
  const existing=state.duties.filter(d=>d.date===date&&d.branch===branch);
@@ -355,6 +291,26 @@ function renderDashboard(){
   $("miniCalendar").innerHTML="";renderCalendar($("miniCalendar"),Number(dashboardMonth.slice(0,4)),Number(dashboardMonth.slice(5,7))-1,false);
   const upcoming=state.duties.filter(d=>d.date.startsWith(monthPrefix)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
   $("upcomingDuties").innerHTML=upcoming.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Branch</th><th>Staff</th><th>Shift / notes</th></tr></thead><tbody>${upcoming.map(d=>`<tr><td>${niceDate(d.date)}</td><td><span class="tag">${escapeHtml(d.branch)}</span></td><td>${escapeHtml(state.staff.find(s=>s.id===d.staffId)?.name||"Unassigned")}</td><td>${escapeHtml(d.notes||"—")}</td></tr>`).join("")}</tbody></table></div>`:'<div class="empty">No duties added yet. Choose a staff member directly in the Duty Calendar table to assign a duty.</div>';
+}
+function renderWeeklyDutyCounts(){
+ const holder=$("weeklyDutyCountContent"); if(!holder)return;
+ const month=$("tableMonth")?.value||"2026-11"; const [yy,mm]=month.split("-").map(Number); const y=yy,m=mm-1;
+ const first=new Date(y,m,1),last=new Date(y,m+1,0); let cursor=new Date(y,m,1);cursor.setDate(cursor.getDate()-cursor.getDay());
+ const weeks=[];
+ while(cursor<=last){const start=new Date(cursor),end=new Date(cursor);end.setDate(end.getDate()+6);weeks.push({start:new Date(start),end:new Date(end)});cursor.setDate(cursor.getDate()+7)}
+ holder.innerHTML=weeks.map((w,i)=>{
+  const startIso=dateISO(w.start.getFullYear(),w.start.getMonth(),w.start.getDate()),endIso=dateISO(w.end.getFullYear(),w.end.getMonth(),w.end.getDate());
+  const rows=state.staff.map(st=>{const count=state.duties.filter(d=>d.staffId===st.id&&d.date>=startIso&&d.date<=endIso).length;return `<tr><td>${escapeHtml(st.name)}</td><td>${count}</td></tr>`}).join("");
+  return `<h3 style="margin-top:${i?16:0}px">Week ${i+1}: ${niceDate(startIso,{month:"short",day:"numeric"})} – ${niceDate(endIso,{month:"short",day:"numeric",year:"numeric"})}</h3><div class="table-wrap"><table><thead><tr><th>Staff member</th><th>Assigned duties</th></tr></thead><tbody>${rows||'<tr><td colspan="2">No staff listed</td></tr>'}</tbody></table></div>`;
+ }).join("");
+}
+async function exportElementPng(elementId,filename){
+ const el=$(elementId); if(!el){alert("Calendar not found.");return}
+ if(!window.html2canvas){alert("PNG export library did not load. Check your internet connection and try again.");return}
+ const oldBg=el.style.backgroundColor;el.style.backgroundColor="#ffffff";
+ try{const canvas=await html2canvas(el,{backgroundColor:"#ffffff",scale:2,useCORS:true,logging:false});const a=document.createElement("a");a.download=filename;a.href=canvas.toDataURL("image/png");a.click()}
+ catch(e){console.error(e);alert("Could not export the calendar as PNG. Please try again.")}
+ finally{el.style.backgroundColor=oldBg}
 }
 function renderStaffCalendar(){
  const target=$("staffCalendar");if(!target)return;
@@ -439,17 +395,14 @@ function renderAvailabilityCalendar(){
  target.innerHTML=out+"</div>";
 }
 async function cycleAvailability(date,staffId){
- if(!dbReady){setCloudStatus('Still connecting to Supabase. Please try again in a moment.',true);return}
- if(!staffId){setCloudStatus('Please choose a staff member first.',true);return}
  const key=date+"|"+staffId;
  const current=state.availability[key]||"Not sure";
  const next=current==="Not sure"?"Available":current==="Available"?"Unavailable":"Not sure";
  state.availability[key]=next;
  $("availDate").value=date;
  save();
- setCloudStatus('Saving availability to Supabase…');
- const saved=await persistAvailability(date,staffId,next);
- if(saved){save({render:false});renderAvailability();setCloudStatus('Availability saved to cloud ✓')}
+ await persistAvailability(date,staffId,next);
+ renderAvailability();
 }
 function renderAvailability(){
  const date=$("availDate").value||"2026-11-01",staffId=$("availStaff").value;
@@ -465,28 +418,7 @@ function renderAvailability(){
 }
 async function setAvailability(key,status){state.availability[key]=status;save();const [date,staffId]=key.split("|");await persistAvailability(date,staffId,status)}
 $("availDate").addEventListener("change",renderAvailability);$("availStaff").addEventListener("change",renderAvailability);$("staffCalendarPerson").addEventListener("change",renderStaffCalendar);$("staffCalendarMonth").addEventListener("change",renderStaffCalendar);
-function renderAll(){fillSelectors();renderStaff();renderDashboard();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderAvailability();renderStaffCalendar();if($("relieverResults"))findRelievers(false)}
-async function exportCalendarAsPng(sourceId,title,filename,subtitle=""){
- const source=$(sourceId);
- if(!source||!source.innerHTML.trim()){alert("There is no calendar content to export yet.");return}
- if(typeof window.html2canvas!=="function"){alert("Image export library did not load. Check your internet connection, then refresh the page and try again.");return}
- const exportRoot=document.createElement("div");
- exportRoot.style.cssText="position:fixed;left:-20000px;top:0;z-index:-1;background:#ffffff;color:#25382b;padding:24px;width:max-content;max-width:none;font-family:Arial,sans-serif;";
- const heading=document.createElement("h1");heading.textContent=title;heading.style.cssText="font-size:24px;margin:0 0 5px;color:#25382b;";exportRoot.appendChild(heading);
- if(subtitle){const sub=document.createElement("p");sub.textContent=subtitle;sub.style.cssText="font-size:13px;margin:0 0 18px;color:#68796d;";exportRoot.appendChild(sub)}
- const clone=source.cloneNode(true);clone.style.width="max-content";clone.style.maxWidth="none";clone.style.overflow="visible";
- clone.querySelectorAll(".schedule-table-wrap,.table-wrap").forEach(el=>{el.style.overflow="visible";el.style.width="max-content";el.style.maxWidth="none"});
- clone.querySelectorAll("select").forEach(sel=>{const span=document.createElement("span");span.textContent=sel.selectedOptions?.[0]?.textContent||"—";span.style.cssText="display:block;padding:8px;font-size:13px;min-width:130px;white-space:normal;color:#25382b;";sel.replaceWith(span)});
- clone.querySelectorAll("button,input,textarea,.schedule-row-actions").forEach(el=>el.remove());
- clone.querySelectorAll(".hidden").forEach(el=>el.remove());
- exportRoot.appendChild(clone);document.body.appendChild(exportRoot);
- try{
-   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-   const canvas=await window.html2canvas(exportRoot,{backgroundColor:"#ffffff",scale:2,useCORS:true,logging:false,windowWidth:Math.max(document.documentElement.clientWidth,exportRoot.scrollWidth),width:exportRoot.scrollWidth,height:exportRoot.scrollHeight,scrollX:0,scrollY:0});
-   const link=document.createElement("a");link.download=filename;link.href=canvas.toDataURL("image/png");link.click();
- }catch(err){console.error("PNG export failed",err);alert("Hindi na-export ang image. Subukan ulit, o tingnan kung pinapayagan ng browser ang downloads.")}
- finally{exportRoot.remove()}
-}
+function renderAll(){fillSelectors();renderStaff();renderDashboard();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderWeeklyDutyCounts();renderAvailability();renderStaffCalendar();if($("relieverResults"))findRelievers(false)}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
 $("nextMonth").addEventListener("click",()=>{viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++}renderAll()});
 $("thisMonth").addEventListener("click",()=>{viewYear=2026;viewMonth=10;renderAll()});
@@ -494,18 +426,8 @@ $("branchFilter").addEventListener("change",()=>renderCalendar($("fullCalendar")
 $("tableMonth").addEventListener("change",()=>{const v=$("tableMonth").value;if(!v)return;viewYear=Number(v.slice(0,4));viewMonth=Number(v.slice(5,7))-1;if($("dashboardMonth"))$("dashboardMonth").value=v;renderAll()});
 $("dashboardMonth").addEventListener("change",()=>{renderDashboard()});
 $("exportScheduleCsv").addEventListener("click",()=>{const prefix=$("tableMonth").value||"2026-11";const [yy,mm]=prefix.split("-").map(Number);const days=new Date(yy,mm,0).getDate();const rows=[["Date",...BRANCHES]];for(let day=1;day<=days;day++){const iso=dateISO(yy,mm-1,day);rows.push([String(day).padStart(2,"0"),...BRANCHES.map(b=>{const d=state.duties.find(x=>x.date===iso&&x.branch===b);return state.staff.find(s=>s.id===d?.staffId)?.name||""})])}const csv=rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(",")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`buko-shake-schedule-${prefix}.csv`;a.click();URL.revokeObjectURL(a.href)});
-$("exportDutyPng").addEventListener("click",()=>{
- const month=$("tableMonth").value||`${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
- const [yy,mm]=month.split("-").map(Number);
- exportCalendarAsPng("fullCalendar",`Pinoy Buko Twist Schedule — Duty Calendar`, `buko-duty-calendar-${month}.png`,`${monthName(yy,mm-1)} · Puregold · Ramrod · Ilwas · Baraca`);
-});
-$("exportStaffPng").addEventListener("click",()=>{
- const staffId=$("staffCalendarPerson").value;
- if(!staffId){alert("Piliin muna kung sinong staff ang ie-export.");return}
- const staff=state.staff.find(x=>x.id===staffId);const month=$("staffCalendarMonth").value||"2026-11";
- const [yy,mm]=month.split("-").map(Number);
- exportCalendarAsPng("staffCalendar",`${staff?.name||"Staff"} — Duty Calendar`, `staff-duty-calendar-${(staff?.name||"staff").toLowerCase().replace(/[^a-z0-9]+/g,"-")}-${month}.png`,monthName(yy,mm-1));
-});
+$("exportDutyPng").addEventListener("click",()=>exportElementPng("fullCalendar",`buko-duty-calendar-${$("tableMonth").value||"2026-11"}.png`));
+$("exportStaffPng").addEventListener("click",()=>{const staff=state.staff.find(s=>s.id===$("staffCalendarPerson").value);if(!staff){alert("Choose a staff member first.");return}const month=$("staffCalendarMonth").value||"2026-11";exportElementPng("staffCalendar",`staff-calendar-${staff.name.replace(/[^a-z0-9]+/gi,"-")}-${month}.png`)});
 function findRelievers(showEmpty=true){
  const date=$("relieverDate").value||"2026-11-01",branch=$("relieverBranch").value||BRANCHES[0],replaced=$("replacedStaff").value;
  if(!state.staff.length){$("relieverResults").innerHTML='<div class="empty">Add staff members first.</div>';return}
@@ -523,6 +445,7 @@ $("importFile").addEventListener("change",async e=>{if(!isAdmin){alert("Admin lo
 load();
 initNewBranchChecks();
 renderAll();
+goTab("availability");
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();setCloudStatus('Signing in…');const {error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});if(error){setCloudStatus('Login failed: '+error.message,true);return}await checkAdmin();if(!isAdmin){setCloudStatus('This account is not assigned the admin role.',true);return}$("loginPassword").value='';await loadCloudData();renderAuth()});
 $("cancelLogin").addEventListener("click",()=>$("loginFormWrap").classList.add("hidden"));
 (async()=>{await checkAdmin();await loadCloudData()})();
