@@ -376,7 +376,7 @@ function renderStaffCalendar(){
  if(!staffId){target.innerHTML='<div class="empty">Choose a staff member to see their personal duty calendar.</div>';return}
  const [y,m1]=month.split("-").map(Number),m=m1-1;
  const first=new Date(y,m,1),start=first.getDay(),days=new Date(y,m+1,0).getDate(),prevDays=new Date(y,m,0).getDate();
- let out='<div class="row" style="gap:12px;margin-bottom:10px;flex-wrap:wrap"><span class="smalltext"><span class="legend-dot" style="background:#fde8e6;border:1px solid #df7770"></span>Red = scheduled but unavailable</span><span class="smalltext"><span class="legend-dot" style="background:#fff2cc;border:1px solid #d8b64b"></span>Yellow = scheduled but not sure</span></div><div class="calendar">'+["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(x=>`<div class="weekday">${x}</div>`).join("");
+ let out='<div class="smalltext" style="margin-bottom:10px">Showing assigned duties only. Availability statuses are hidden in this calendar.</div><div class="calendar">'+["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(x=>`<div class="weekday">${x}</div>`).join("");
  for(let i=0;i<42;i++){
    let dayNum,yy=y,mm=m,outside=false;
    if(i<start){dayNum=prevDays-start+i+1;mm=m-1;outside=true;if(mm<0){mm=11;yy--}}
@@ -385,18 +385,12 @@ function renderStaffCalendar(){
    const iso=dateISO(yy,mm,dayNum);
    const selectedStaff=state.staff.find(s=>s.id===staffId);
    const assigned=state.duties.filter(d=>d.date===iso&&d.staffId===staffId&&staffCanWorkAt(selectedStaff||{},d.branch));
-   const status=state.availability[iso+"|"+staffId]||"Not sure";
    const allSameDayDuties=state.duties.filter(d=>d.date===iso&&d.staffId===staffId);
    const duplicateDuty=allSameDayDuties.length>1;
-   const hasConflict=assigned.length>0&&(status==="Unavailable"||status==="Not sure");
-   const conflictClass=duplicateDuty?"conflict-duplicate":hasConflict?(status==="Unavailable"?"conflict-unavailable":"conflict-unsure"):"";
    const today=new Date(),isToday=today.getFullYear()===yy&&today.getMonth()===mm&&today.getDate()===dayNum;
-   out+=`<div class="day ${outside?"outside":""} ${isToday?"today":""} ${!outside?conflictClass:""}"><div class="daynum"><span>${dayNum}</span></div>`;
+   out+=`<div class="day ${outside?"outside":""} ${isToday?"today":""}"><div class="daynum"><span>${dayNum}</span></div>`;
    assigned.forEach(d=>out+=`<div class="duty-pill ${BRANCH_CLASS[d.branch]||""}" title="${escapeHtml(d.notes||d.branch)}">${escapeHtml(d.branch)}${d.notes?" · "+escapeHtml(d.notes):""}</div>`);
-   if(!outside&&duplicateDuty)out+='<span class="conflict-label duplicate">⚠ DUPLICATE DUTY</span>';
-   else if(!outside&&hasConflict)out+=`<span class="conflict-label ${status==="Unavailable"?"red":"yellow"}">${status==="Unavailable"?"⚠ UNAVAILABLE":"? NOT SURE"}</span>`;
-   else if(!outside&&!assigned.length&&status==="Unavailable")out+='<span class="tag unavailable">Unavailable</span>';
-   else if(!outside&&!assigned.length&&status==="Available")out+='<span class="tag available">Available</span>';
+   if(!outside&&duplicateDuty)out+='<span class="conflict-label duplicate">⚠ MULTIPLE DUTIES</span>';
    out+="</div>";
  }
  target.innerHTML=out+"</div>";
