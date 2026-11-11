@@ -182,8 +182,8 @@
       <form id="scheduleSwapForm" class="form-grid">
         <div class="field"><label>Date of swapped duty</label><input id="swapDate" type="date" required></div>
         <div class="field"><label>Branch</label><select id="swapBranch" required></select></div>
-        <div class="field"><label>Originally scheduled staff</label><select id="swapFromStaff" required></select></div>
-        <div class="field"><label>Staff who took over</label><select id="swapToStaff" required></select></div>
+        <div class="field"><label>Automatically detected scheduled staff</label><select id="swapFromStaff" disabled></select></div>
+        <div class="field"><label>Who swapped / took over?</label><select id="swapToStaff" required></select></div>
         <div class="field wide"><label>Notes / reason (optional)</label><textarea id="swapNotes" rows="2" placeholder="e.g. They agreed to exchange their duty dates"></textarea></div>
         <div class="wide"><button class="primary" type="submit">＋ Save schedule swap record</button></div>
       </form>
@@ -685,8 +685,19 @@ function exportAttendanceCsv(){const month=($("attendanceDate").value||new Date(
 
 function renderScheduleSwapHistory(){const host=$("scheduleSwapHistory");if(!host)return;const rows=[...(state.scheduleChanges||[])].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));host.innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Branch</th><th>Originally scheduled</th><th>Covered by</th><th>Notes</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${escapeHtml(x.date)}</td><td>${escapeHtml(x.branch)}</td><td>${escapeHtml(x.fromName)}</td><td>${escapeHtml(x.toName)}</td><td>${escapeHtml(x.notes||'')}</td><td><button class="small danger" type="button" onclick="deleteScheduleSwap('${x.id}')">Delete</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No schedule swaps recorded yet.</div>'}
 function deleteScheduleSwap(id){if(!isAdmin)return;if(!confirm('Delete this schedule swap record?'))return;state.scheduleChanges=(state.scheduleChanges||[]).filter(x=>x.id!==id);save();renderScheduleSwapHistory()}
-$("scheduleSwapForm").addEventListener("submit",e=>{e.preventDefault();if(!isAdmin){alert('Admin login required.');return}const date=$("swapDate").value,branch=$("swapBranch").value,fromId=$("swapFromStaff").value,toId=$("swapToStaff").value;if(!date||!branch||!fromId||!toId||fromId===toId){alert('Choose a date, branch, and two different staff members.');return}const from=state.staff.find(x=>x.id===fromId),to=state.staff.find(x=>x.id===toId);state.scheduleChanges=state.scheduleChanges||[];state.scheduleChanges.push({id:uid(),date,branch,fromStaffId:fromId,toStaffId:toId,fromName:from?.name||'',toName:to?.name||'',notes:$("swapNotes").value.trim(),createdAt:new Date().toISOString()});save({render:false});$("swapNotes").value='';renderScheduleSwapHistory();setCloudStatus('Schedule swap recorded in this browser.');});
-function setupScheduleSwapForm(){setOptions($("swapBranch"),BRANCHES.map(b=>({value:b,label:b})));const opts=state.staff.map(s=>({value:s.id,label:s.name}));setOptions($("swapFromStaff"),opts);setOptions($("swapToStaff"),opts);if(!$("swapDate").value)$("swapDate").value=$("attendanceDate").value||new Date().toISOString().slice(0,10);}
+function updateScheduleSwapStaff(){
+ const date=$("swapDate").value,branch=$("swapBranch").value;
+ const scheduled=state.duties.find(d=>d.date===date&&d.branch===branch&&d.staffId);
+ const from=scheduled?state.staff.find(x=>x.id===scheduled.staffId):null;
+ setOptions($("swapFromStaff"),from?[{value:from.id,label:from.name}]:[],"No scheduled staff found");
+ const choices=state.staff.filter(x=>!from||x.id!==from.id).map(x=>({value:x.id,label:x.name}));
+ setOptions($("swapToStaff"),choices,"Select the staff who swapped");
+ $("swapToStaff").disabled=!from;
+}
+$("swapDate").addEventListener("change",updateScheduleSwapStaff);
+$("swapBranch").addEventListener("change",updateScheduleSwapStaff);
+$("scheduleSwapForm").addEventListener("submit",e=>{e.preventDefault();if(!isAdmin){alert('Admin login required.');return}const date=$("swapDate").value,branch=$("swapBranch").value;const scheduled=state.duties.find(d=>d.date===date&&d.branch===branch&&d.staffId);const fromId=scheduled?.staffId||"",toId=$("swapToStaff").value;if(!date||!branch||!fromId||!toId||fromId===toId){alert('Walang naka-assign na staff sa napiling date at branch, o hindi valid ang piniling kapalit.');return}const from=state.staff.find(x=>x.id===fromId),to=state.staff.find(x=>x.id===toId);state.scheduleChanges=state.scheduleChanges||[];state.scheduleChanges.push({id:uid(),date,branch,fromStaffId:fromId,toStaffId:toId,fromName:from?.name||'',toName:to?.name||'',notes:$("swapNotes").value.trim(),createdAt:new Date().toISOString()});save({render:false});$("swapNotes").value='';renderScheduleSwapHistory();setCloudStatus('Schedule swap recorded in this browser.');});
+function setupScheduleSwapForm(){setOptions($("swapBranch"),BRANCHES.map(b=>({value:b,label:b})),"Select branch");if(!$("swapDate").value)$("swapDate").value=$("attendanceDate").value||new Date().toISOString().slice(0,10);updateScheduleSwapStaff();}
 function renderAll(){fillSelectors();setOptions($("attendanceBranch"),BRANCHES.map(b=>({value:b,label:b})));setupScheduleSwapForm();renderScheduleSwapHistory();if(!$("attendanceDate").value)$("attendanceDate").value=new Date().toISOString().slice(0,10);if($("attendanceMonth"))$("attendanceMonth").value=$("attendanceDate").value.slice(0,7);renderBranchTimeSettings();renderStaff();renderDashboard();if(typeof updateAdminTallyVisibility==="function")updateAdminTallyVisibility();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderWeeklyDutyCounts();renderAvailability();renderStaffCalendar();renderAttendance();if($("relieverResults"))findRelievers(false)}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
 $("nextMonth").addEventListener("click",()=>{viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++}renderAll()});
