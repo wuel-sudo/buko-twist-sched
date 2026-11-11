@@ -687,7 +687,7 @@ function renderScheduleSwapHistory(){const host=$("scheduleSwapHistory");if(!hos
 function deleteScheduleSwap(id){if(!isAdmin)return;if(!confirm('Delete this schedule swap record?'))return;state.scheduleChanges=(state.scheduleChanges||[]).filter(x=>x.id!==id);save();renderScheduleSwapHistory()}
 function updateScheduleSwapStaff(){
  const date=$("swapDate").value,branch=$("swapBranch").value;
- const scheduled=state.duties.find(d=>d.date===date&&d.branch===branch&&d.staffId);
+ const scheduled=state.duties.find(d=>d.date===date&&String(d.branch||"").trim().toLowerCase()===String(branch||"").trim().toLowerCase()&&d.staffId);
  const from=scheduled?state.staff.find(x=>x.id===scheduled.staffId):null;
  setOptions($("swapFromStaff"),from?[{value:from.id,label:from.name}]:[],"No scheduled staff found");
  const choices=state.staff.filter(x=>!from||x.id!==from.id).map(x=>({value:x.id,label:x.name}));
@@ -696,8 +696,14 @@ function updateScheduleSwapStaff(){
 }
 $("swapDate").addEventListener("change",updateScheduleSwapStaff);
 $("swapBranch").addEventListener("change",updateScheduleSwapStaff);
-$("scheduleSwapForm").addEventListener("submit",e=>{e.preventDefault();if(!isAdmin){alert('Admin login required.');return}const date=$("swapDate").value,branch=$("swapBranch").value;const scheduled=state.duties.find(d=>d.date===date&&d.branch===branch&&d.staffId);const fromId=scheduled?.staffId||"",toId=$("swapToStaff").value;if(!date||!branch||!fromId||!toId||fromId===toId){alert('Walang naka-assign na staff sa napiling date at branch, o hindi valid ang piniling kapalit.');return}const from=state.staff.find(x=>x.id===fromId),to=state.staff.find(x=>x.id===toId);state.scheduleChanges=state.scheduleChanges||[];state.scheduleChanges.push({id:uid(),date,branch,fromStaffId:fromId,toStaffId:toId,fromName:from?.name||'',toName:to?.name||'',notes:$("swapNotes").value.trim(),createdAt:new Date().toISOString()});save({render:false});$("swapNotes").value='';renderScheduleSwapHistory();setCloudStatus('Schedule swap recorded in this browser.');});
-function setupScheduleSwapForm(){setOptions($("swapBranch"),BRANCHES.map(b=>({value:b,label:b})),"Select branch");if(!$("swapDate").value)$("swapDate").value=$("attendanceDate").value||new Date().toISOString().slice(0,10);updateScheduleSwapStaff();}
+$("scheduleSwapForm").addEventListener("submit",e=>{e.preventDefault();if(!isAdmin){alert('Admin login required.');return}const date=$("swapDate").value,branch=$("swapBranch").value;const scheduled=state.duties.find(d=>d.date===date&&String(d.branch||"").trim().toLowerCase()===String(branch||"").trim().toLowerCase()&&d.staffId);const fromId=scheduled?.staffId||"",toId=$("swapToStaff").value;if(!date||!branch||!fromId||!toId||fromId===toId){alert('Walang naka-assign na staff sa napiling date at branch, o hindi valid ang piniling kapalit.');return}const from=state.staff.find(x=>x.id===fromId),to=state.staff.find(x=>x.id===toId);state.scheduleChanges=state.scheduleChanges||[];state.scheduleChanges.push({id:uid(),date,branch,fromStaffId:fromId,toStaffId:toId,fromName:from?.name||'',toName:to?.name||'',notes:$("swapNotes").value.trim(),createdAt:new Date().toISOString()});save({render:false});$("swapNotes").value='';renderScheduleSwapHistory();setCloudStatus('Schedule swap recorded in this browser.');});
+function setupScheduleSwapForm(){
+ setOptions($("swapBranch"),BRANCHES.map(b=>({value:b,label:b})),"Select branch");
+ if(!$("swapDate").value)$("swapDate").value=$("attendanceDate").value||new Date().toISOString().slice(0,10);
+ // Ensure a real branch is selected on first load; the placeholder has an empty value.
+ if(!$("swapBranch").value && BRANCHES.length)$("swapBranch").value=BRANCHES[0];
+ updateScheduleSwapStaff();
+}
 function renderAll(){fillSelectors();setOptions($("attendanceBranch"),BRANCHES.map(b=>({value:b,label:b})));setupScheduleSwapForm();renderScheduleSwapHistory();if(!$("attendanceDate").value)$("attendanceDate").value=new Date().toISOString().slice(0,10);if($("attendanceMonth"))$("attendanceMonth").value=$("attendanceDate").value.slice(0,7);renderBranchTimeSettings();renderStaff();renderDashboard();if(typeof updateAdminTallyVisibility==="function")updateAdminTallyVisibility();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderWeeklyDutyCounts();renderAvailability();renderStaffCalendar();renderAttendance();if($("relieverResults"))findRelievers(false)}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
 $("nextMonth").addEventListener("click",()=>{viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++}renderAll()});
