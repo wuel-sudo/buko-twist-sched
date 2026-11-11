@@ -147,6 +147,19 @@
         <button class="soft" id="exportAttendanceCsv" type="button">⬇ Download attendance CSV</button>
         <button class="soft" id="exportSwapCsv" type="button">⬇ Download swap history</button>
       </div>
+      <div class="card" style="margin:12px 0;box-shadow:none;background:var(--mint)">
+        <div class="calendar-head" style="align-items:center">
+          <div><h3 style="margin:0">Monthly attendance calendar</h3><div class="smalltext">Choose any date to view or record attendance for that day.</div></div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <button type="button" class="soft" id="attendancePrevMonth" aria-label="Previous month">‹</button>
+            <input type="month" id="attendanceMonth" style="max-width:155px">
+            <button type="button" class="soft" id="attendanceNextMonth" aria-label="Next month">›</button>
+            <button type="button" class="soft" id="attendanceToday">Today</button>
+          </div>
+        </div>
+        <div id="attendanceMonthCalendar"></div>
+        <div class="smalltext" style="margin-top:8px">Tap a date cell to select it. Green = Present, yellow = Late, red = Absent, gray = no record.</div>
+      </div>
       <div id="attendanceExpectedTime" class="hint" style="margin-bottom:12px">Set the expected time-in for each branch in Branch time settings.</div>
       <div id="attendanceRecords"></div>
     </div>
@@ -532,7 +545,59 @@ async function saveBranchTimeSettings(){
  const {error}=await supabaseClient.from('branch_attendance_settings').upsert(updates,{onConflict:'branch_id'});if(error){setCloudStatus('Could not save branch time settings: '+error.message,true);alert('Could not save settings. Apply the attendance SQL setup first, then try again.');return}
  state.branchTimeIns={};updates.forEach(x=>state.branchTimeIns[x.branch]={expectedTime:x.expected_time,graceMinutes:x.grace_minutes});save({render:false});setCloudStatus('Branch time settings saved.');renderAttendance();
 }
+function renderAttendanceMonthCalendar(){
+ const host=$("attendanceMonthCalendar");if(!host)return;
+ const month=$("attendanceMonth")?.value||($("attendanceDate")?.value||new Date().toISOString().slice(0,10)).slice(0,7);
+ const [year,monthNum]=month.split("-").map(Number),monthIndex=monthNum-1;
+ const firstDay=new Date(year,monthIndex,1).getDay(),days=new Date(year,monthIndex+1,0).getDate();
+ const selected=$("attendanceDate")?.value||"";
+ let out='<div class="attendance-month-grid" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px">';
+ ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach(d=>out+=`<div style="text-align:center;font-size:12px;font-weight:700;padding:6px 0">${d}</div>`);
+ for(let i=0;i<firstDay;i++)out+='<div></div>';
+ for(let day=1;day<=days;day++){
+  const iso=dateISO(year,monthIndex,day),duties=state.duties.filter(d=>d.date===iso);
+  const dayRecords=BRANCHES.map(branch=>{
+   const rec=state.attendance[iso+"|"+branch];
+   return rec?{branch,status:rec.status}:null;
+  }).filter(Boolean);
+  const countPresent=dayRecords.filter(x=>x.status==="present").length;
+  const countLate=dayRecords.filter(x=>x.status==="late").length;
+  const countAbsent=dayRecords.filter(x=>x.status==="absent").length;
+  const isSelected=selected===iso;
+  const branchDots=BRANCHES.map(branch=>{
+   const rec=state.attendance[iso+"|"+branch];
+   const duty=duties.find(d=>d.branch===branch);
+   const status=rec?.status;
+   const color=status==="present"?"#23834b":status==="late"?"#d49a16":status==="absent"?"#c74646":"#9aa3a0";
+   return `<span title="${escapeHtml(branch)}: ${status|| (duty?'Not recorded':'No duty')}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin:1px"></span>`;
+  }).join("");
+  out+=`<button type="button" class="attendance-day-cell" data-attendance-day="${iso}" style="min-width:0;min-height:82px;padding:6px 3px;border:2px solid ${isSelected?'var(--green,#39845b)':'var(--line,#dce5dc)'};border-radius:9px;background:${isSelected?'#e3f1e2':'var(--surface,#fff)'};color:inherit;text-align:left;cursor:pointer">
+   <strong style="display:block;font-size:14px">${day}</strong>
+   <span style="display:block;font-size:10px;color:var(--muted,#667)">${duties.length} duty${duties.length===1?'':'ies'}</span>
+   <span style="display:block;line-height:1.5">${branchDots}</span>
+   <span style="display:block;font-size:10px;white-space:nowrap">${countPresent?`P:${countPresent} `:''}${countLate?`L:${countLate} `:''}${countAbsent?`A:${countAbsent}`:''}</span>
+  </button>`;
+ }
+ out+='</div>';
+ host.innerHTML=out;
+ host.querySelectorAll("[data-attendance-day]").forEach(btn=>btn.addEventListener("click",()=>{
+  $("attendanceDate").value=btn.dataset.attendanceDay;
+  $("attendanceMonth").value=btn.dataset.attendanceDay.slice(0,7);
+  renderAttendanceMonthCalendar();renderAttendance();
+ }));
+}
+function changeAttendanceMonth(delta){
+ const current=$("attendanceMonth").value||($("attendanceDate").value||new Date().toISOString().slice(0,10)).slice(0,7);
+ const [y,m]=current.split("-").map(Number),next=new Date(y,m-1+delta,1);
+ const month=next.getFullYear()+"-"+String(next.getMonth()+1).padStart(2,"0");
+ $("attendanceMonth").value=month;
+ const day=Number(($("attendanceDate").value||"").slice(8,10))||1;
+ const max=new Date(next.getFullYear(),next.getMonth()+1,0).getDate();
+ $("attendanceDate").value=month+"-"+String(Math.min(day,max)).padStart(2,"0");
+ renderAttendanceMonthCalendar();renderAttendance();
+}
 function renderAttendance(){
+ renderAttendanceMonthCalendar();
  const date=$("attendanceDate")?.value||new Date().toISOString().slice(0,10),branch=$("attendanceBranch")?.value||BRANCHES[0];
  if(!isAdmin){$("attendanceRecords").innerHTML='<div class="empty">Admin login is required to record attendance.</div>';return}
  const setting=state.branchTimeIns[branch]||{};const expected=setting.expectedTime||'';const grace=Number(setting.graceMinutes||0);
@@ -584,7 +649,7 @@ function renderScheduleSwapHistory(){const host=$("scheduleSwapHistory");if(!hos
 function deleteScheduleSwap(id){if(!isAdmin)return;if(!confirm('Delete this schedule swap record?'))return;state.scheduleChanges=(state.scheduleChanges||[]).filter(x=>x.id!==id);save();renderScheduleSwapHistory()}
 $("scheduleSwapForm").addEventListener("submit",e=>{e.preventDefault();if(!isAdmin){alert('Admin login required.');return}const date=$("swapDate").value,branch=$("swapBranch").value,fromId=$("swapFromStaff").value,toId=$("swapToStaff").value;if(!date||!branch||!fromId||!toId||fromId===toId){alert('Choose a date, branch, and two different staff members.');return}const from=state.staff.find(x=>x.id===fromId),to=state.staff.find(x=>x.id===toId);state.scheduleChanges=state.scheduleChanges||[];state.scheduleChanges.push({id:uid(),date,branch,fromStaffId:fromId,toStaffId:toId,fromName:from?.name||'',toName:to?.name||'',notes:$("swapNotes").value.trim(),createdAt:new Date().toISOString()});save({render:false});$("swapNotes").value='';renderScheduleSwapHistory();setCloudStatus('Schedule swap recorded in this browser.');});
 function setupScheduleSwapForm(){setOptions($("swapBranch"),BRANCHES.map(b=>({value:b,label:b})));const opts=state.staff.map(s=>({value:s.id,label:s.name}));setOptions($("swapFromStaff"),opts);setOptions($("swapToStaff"),opts);if(!$("swapDate").value)$("swapDate").value=$("attendanceDate").value||new Date().toISOString().slice(0,10);}
-function renderAll(){fillSelectors();setOptions($("attendanceBranch"),BRANCHES.map(b=>({value:b,label:b})));setupScheduleSwapForm();renderScheduleSwapHistory();if(!$("attendanceDate").value)$("attendanceDate").value=new Date().toISOString().slice(0,10);renderBranchTimeSettings();renderStaff();renderDashboard();if(typeof updateAdminTallyVisibility==="function")updateAdminTallyVisibility();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderWeeklyDutyCounts();renderAvailability();renderStaffCalendar();renderAttendance();if($("relieverResults"))findRelievers(false)}
+function renderAll(){fillSelectors();setOptions($("attendanceBranch"),BRANCHES.map(b=>({value:b,label:b})));setupScheduleSwapForm();renderScheduleSwapHistory();if(!$("attendanceDate").value)$("attendanceDate").value=new Date().toISOString().slice(0,10);if($("attendanceMonth"))$("attendanceMonth").value=$("attendanceDate").value.slice(0,7);renderBranchTimeSettings();renderStaff();renderDashboard();if(typeof updateAdminTallyVisibility==="function")updateAdminTallyVisibility();$("monthTitle").textContent=monthName(viewYear,viewMonth);renderCalendar($("fullCalendar"),viewYear,viewMonth,true);renderWeeklyDutyCounts();renderAvailability();renderStaffCalendar();renderAttendance();if($("relieverResults"))findRelievers(false)}
 $("prevMonth").addEventListener("click",()=>{viewMonth--;if(viewMonth<0){viewMonth=11;viewYear--}renderAll()});
 $("nextMonth").addEventListener("click",()=>{viewMonth++;if(viewMonth>11){viewMonth=0;viewYear++}renderAll()});
 $("thisMonth").addEventListener("click",()=>{viewYear=2026;viewMonth=10;renderAll()});
@@ -592,7 +657,11 @@ $("branchFilter").addEventListener("change",()=>renderCalendar($("fullCalendar")
 $("tableMonth").addEventListener("change",()=>{const v=$("tableMonth").value;if(!v)return;viewYear=Number(v.slice(0,4));viewMonth=Number(v.slice(5,7))-1;if($("dashboardMonth"))$("dashboardMonth").value=v;renderAll()});
 $("dashboardMonth").addEventListener("change",()=>{renderDashboard()});
 
-$("attendanceDate").addEventListener("change",renderAttendance);
+$("attendanceDate").addEventListener("change",()=>{$("attendanceMonth").value=$("attendanceDate").value.slice(0,7);renderAttendance()});
+$("attendanceMonth").addEventListener("change",()=>{const month=$("attendanceMonth").value;if(month){$("attendanceDate").value=month+"-01";renderAttendance()}});
+$("attendancePrevMonth").addEventListener("click",()=>changeAttendanceMonth(-1));
+$("attendanceNextMonth").addEventListener("click",()=>changeAttendanceMonth(1));
+$("attendanceToday").addEventListener("click",()=>{const today=new Date().toISOString().slice(0,10);$("attendanceDate").value=today;$("attendanceMonth").value=today.slice(0,7);renderAttendance()});
 $("attendanceBranch").addEventListener("change",renderAttendance);
 $("saveBranchTimeSettings").addEventListener("click",saveBranchTimeSettings);
 $("exportAttendanceCsv").addEventListener("click",exportAttendanceCsv);
