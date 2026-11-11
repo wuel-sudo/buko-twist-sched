@@ -208,7 +208,7 @@ const BRANCH_CLASS={"Puregold":"puregold","Ramrod":"ramrod","Ilwas":"ilwas","Bar
 const STORE_KEY="bukoShakeDutyPlanner_v1";
 const SUPABASE_URL="https://mwjbeyztcmdjuxgipatv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY="sb_publishable_aaSGpn2mw_PfgHO6_YUZjQ_szVRrVvW";
-const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const supabaseClient=window.supabase?.createClient ? window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY) : null;
 let currentUser=null,isAdmin=false,dbReady=false,branchIds={};
 const $=id=>document.getElementById(id);
 let viewYear=2026,viewMonth=10,selectedDate="2026-11-01";
@@ -226,11 +226,13 @@ function renderAuth(){
  document.querySelectorAll('#schedule select, #staffForm input, #staffForm select, #staffForm button, #staffList button, #staffList input, #staffList select, #relieverResults button').forEach(el=>{if(el.closest('#schedule')||el.closest('#staff'))el.disabled=!isAdmin});
 }
 async function checkAdmin(){
+ if(!supabaseClient)throw new Error("Supabase library did not load. Check your internet connection or CDN access, then refresh.");
  const {data:{session}}=await supabaseClient.auth.getSession();currentUser=session?.user||null;isAdmin=false;
  if(currentUser){const {data,error}=await supabaseClient.from('staff_profiles').select('role,active').eq('auth_user_id',currentUser.id).maybeSingle();if(!error&&data&&data.role==='admin'&&data.active===true)isAdmin=true;else await supabaseClient.auth.signOut().catch(()=>{});}
  renderAuth();updatePublicNavigation();return isAdmin;
 }
 async function loadCloudData(){
+ if(!supabaseClient)throw new Error('Supabase library did not load. Check your internet connection or CDN access, then refresh.');
  setCloudStatus('Syncing latest shared data…');
  const [br,st,du,av]=await Promise.all([
   supabaseClient.from('branches').select('id,name'),
@@ -541,15 +543,15 @@ function renderAttendance(){
  const key=date+'|'+branch,record=state.attendance[key]||{},status=record.status||'unrecorded';
  const statusLabel=status==='late'?'Late':status==='absent'?'Absent':status==='present'?'Present':'Not recorded';
  const badgeClass=status==='late'?'unsure':status==='absent'?'unavailable':status==='present'?'available':'';
- $("attendanceRecords").innerHTML=`<div class="card" style="box-shadow:none;background:var(--mint)"><div class="row between"><div><h3 style="margin:0">${escapeHtml(staff.name)}</h3><div class="smalltext">${escapeHtml(branch)} · ${niceDate(date,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</div></div><span class="tag ${badgeClass}">${statusLabel}</span></div><div class="form-grid" style="margin-top:14px"><div class="field"><label>Actual time-in</label><input id="attendanceTimeIn" type="time" value="${escapeHtml(record.timeIn||'')}" ${!expected?'disabled':''}></div><div class="field"><label>Attendance status</label><input id="attendanceStatusPreview" value="${statusLabel}" readonly></div><div class="field wide"><label>Notes (optional)</label><input id="attendanceNotes" value="${escapeHtml(record.notes||'')}" placeholder="Reason or remarks"></div><div class="field"><label>Replacement staff (if absent)</label><select id="attendanceReplacement"><option value="">No replacement / not applicable</option>${state.staff.filter(s=>s.id!==staff.id).map(s=>`<option value="${s.id}" ${record.replacementStaffId===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="field"><label>Replacement details</label><input id="replacementNotes" value="${escapeHtml(record.replacementNotes||'')}" placeholder="Who covered and any details"></div></div><div class="row" style="margin-top:12px"><button class="primary" id="saveAttendanceRecord" type="button" ${!expected?'disabled':''}>Save time-in</button><button class="danger" id="markAttendanceAbsent" type="button">Mark absent</button><button id="clearAttendanceRecord" type="button">Clear record</button></div><p class="smalltext" style="margin:10px 0 0">${expected?'Late status is automatic based on the branch expected time-in and grace period.':'Set the branch expected time-in below to enable time-in recording.'}</p></div>`;
- const timeInput=$("attendanceTimeIn");timeInput?.addEventListener('input',()=>{const preview=timeInput.value?attendanceStatus(timeInput.value,expected,grace):'unrecorded';$("attendanceStatusPreview").value=preview==='late'?'Late':preview==='present'?'Present':'Not recorded'});
- $("saveAttendanceRecord")?.addEventListener('click',()=>saveAttendance(date,branch,duty.staffId,timeInput.value,'present'));
+ $("attendanceRecords").innerHTML=`<div class="card" style="box-shadow:none;background:var(--mint)"><div class="row between"><div><h3 style="margin:0">${escapeHtml(staff.name)}</h3><div class="smalltext">${escapeHtml(branch)} · ${niceDate(date,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</div></div><span class="tag ${badgeClass}">${statusLabel}</span></div><div class="form-grid" style="margin-top:14px"><div class="field"><label>Actual time-in</label><input id="attendanceTimeIn" type="time" value="${escapeHtml(record.timeIn||'')}" ${!expected?'disabled':''}></div><div class="field"><label>Attendance status</label><select id="attendanceStatusChoice"><option value="present" ${status==='present'?'selected':''}>Present</option><option value="late" ${status==='late'?'selected':''}>Late</option><option value="absent" ${status==='absent'?'selected':''}>Absent</option></select><div class="smalltext">Late can be selected manually, or calculated from time-in.</div></div><div class="field wide"><label>Notes (optional)</label><input id="attendanceNotes" value="${escapeHtml(record.notes||'')}" placeholder="Reason or remarks"></div><div class="field"><label>Replacement staff (if absent)</label><select id="attendanceReplacement"><option value="">No replacement / not applicable</option>${state.staff.filter(s=>s.id!==staff.id).map(s=>`<option value="${s.id}" ${record.replacementStaffId===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="field"><label>Replacement details</label><input id="replacementNotes" value="${escapeHtml(record.replacementNotes||'')}" placeholder="Who covered and any details"></div></div><div class="row" style="margin-top:12px"><button class="primary" id="saveAttendanceRecord" type="button">Save attendance</button><button class="danger" id="markAttendanceAbsent" type="button">Mark absent</button><button id="clearAttendanceRecord" type="button">Clear record</button></div><p class="smalltext" style="margin:10px 0 0">${expected?'Late is calculated from the branch expected time-in and grace period, but you can also select a status manually.':'You can still mark Present, Late, or Absent manually. Set expected time-in below to enable automatic late calculation.'}</p></div>`;
+ const timeInput=$("attendanceTimeIn");timeInput?.addEventListener('input',()=>{if(expected&&timeInput.value){const calculated=attendanceStatus(timeInput.value,expected,grace);$("attendanceStatusChoice").value=calculated;}});
+ $("saveAttendanceRecord")?.addEventListener('click',()=>saveAttendance(date,branch,duty.staffId,timeInput.value,$("attendanceStatusChoice")?.value||'present'));
  $("markAttendanceAbsent")?.addEventListener('click',()=>saveAttendance(date,branch,duty.staffId,'','absent'));
  $("clearAttendanceRecord")?.addEventListener('click',()=>deleteAttendance(date,branch));
 }
 async function saveAttendance(date,branch,staffId,timeIn,forcedStatus){
  if(!isAdmin)return;const setting=state.branchTimeIns[branch]||{};if(!setting.expectedTime){alert(`Set the expected time-in for ${branch} first.`);return}
- const status=forcedStatus==='absent'?'absent':attendanceStatus(timeIn,setting.expectedTime,setting.graceMinutes);if(status==='unrecorded'){alert('Enter the actual time-in or mark the staff member absent.');return}
+ const status=forcedStatus==='absent'?'absent':(forcedStatus==='late'?'late':(forcedStatus==='present'?'present':attendanceStatus(timeIn,setting.expectedTime,setting.graceMinutes)));if(status!=='absent'&&!timeIn){alert('Enter the actual time-in for Present or Late attendance.');return}
  const branchId=Object.entries(branchIds).find(([id,name])=>name===branch)?.[0];const old=state.attendance[date+'|'+branch]||{};
  const replacementStaffId=$("attendanceReplacement")?.value||'';const replacementStaff=state.staff.find(s=>s.id===replacementStaffId);const replacementNotes=$("replacementNotes")?.value.trim()||'';const baseNotes=$("attendanceNotes")?.value.trim()||'';const detailParts=[];if(baseNotes)detailParts.push(baseNotes);if(status==='absent'&&replacementStaff)detailParts.push('Replacement: '+replacementStaff.name);if(status==='absent'&&replacementNotes)detailParts.push('Replacement details: '+replacementNotes);const row={duty_date:date,branch_id:branchId,staff_id:staffId,time_in:timeIn||null,status,expected_time:setting.expectedTime,grace_minutes:Number(setting.graceMinutes||0),notes:detailParts.join(' | ')};
  const {data,error}=await supabaseClient.from('attendance_records').upsert(row,{onConflict:'duty_date,branch_id'}).select('id').single();if(error){setCloudStatus('Attendance save failed: '+error.message,true);alert('Could not save attendance. Apply the attendance SQL setup first.');return}
@@ -645,7 +647,7 @@ renderAll();
 goTab("availability");
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();setCloudStatus('Signing in…');const {error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});if(error){setCloudStatus('Login failed: '+error.message,true);return}await checkAdmin();if(!isAdmin){setCloudStatus('This account is not assigned the admin role.',true);return}$("loginPassword").value='';await loadCloudData();renderAuth()});
 $("cancelLogin").addEventListener("click",()=>$("loginFormWrap").classList.add("hidden"));
-(async()=>{await checkAdmin();await loadCloudData()})();
+(async()=>{try{await checkAdmin();await loadCloudData()}catch(err){console.error("Cloud initialization failed:",err);setCloudStatus("Connection failed: "+(err?.message||String(err)),true);renderAll()}})();
 </script>
 </body>
 </html>
