@@ -147,7 +147,12 @@
         <button class="soft" id="exportAttendanceCsv" type="button">⬇ Download attendance CSV</button>
         <button class="soft" id="exportSwapCsv" type="button">⬇ Download swap history</button>
       </div>
-      <div class="card" style="margin:12px 0;box-shadow:none;background:var(--mint)">
+      <div class="row" style="gap:8px;margin:12px 0">
+        <button type="button" class="primary" id="attendanceCalendarTab" aria-pressed="true">Calendar View</button>
+        <button type="button" class="soft" id="attendanceTableTab" aria-pressed="false">Table View</button>
+      </div>
+      <div id="attendanceCalendarView">
+      <div class="card" style="margin:0 0 12px;box-shadow:none;background:var(--mint)">
         <div class="calendar-head" style="align-items:center">
           <div><h3 style="margin:0">Monthly attendance calendar</h3><div class="smalltext">Choose any date to view or record attendance for that day.</div></div>
           <div class="row" style="gap:6px;flex-wrap:wrap">
@@ -159,6 +164,14 @@
         </div>
         <div id="attendanceMonthCalendar"></div>
         <div class="smalltext" style="margin-top:8px">Tap a date cell to select it. Green = Present, yellow = Late, red = Absent, gray = no record.</div>
+      </div>
+      </div>
+      <div id="attendanceTableView" style="display:none;margin:0 0 12px">
+        <div class="row between" style="margin-bottom:8px;flex-wrap:wrap">
+          <h3 style="margin:0">Attendance records table</h3>
+          <div class="field" style="min-width:160px"><label for="attendanceTableMonth">Month</label><input type="month" id="attendanceTableMonth"></div>
+        </div>
+        <div id="attendanceRecordsTable"></div>
       </div>
       <div id="attendanceExpectedTime" class="hint" style="margin-bottom:12px">Set the expected time-in for each branch in Branch time settings.</div>
       <div id="attendanceRecords"></div>
@@ -596,8 +609,33 @@ function changeAttendanceMonth(delta){
  $("attendanceDate").value=month+"-"+String(Math.min(day,max)).padStart(2,"0");
  renderAttendanceMonthCalendar();renderAttendance();
 }
+let attendanceDisplayMode="calendar";
+function setAttendanceDisplayMode(mode){
+ attendanceDisplayMode=mode==="table"?"table":"calendar";
+ const cal=$("attendanceCalendarView"),tab=$("attendanceCalendarTab"),table=$("attendanceTableView"),tableTab=$("attendanceTableTab");
+ if(cal)cal.style.display=attendanceDisplayMode==="calendar"?"block":"none";
+ if(table)table.style.display=attendanceDisplayMode==="table"?"block":"none";
+ if(tab){tab.className=attendanceDisplayMode==="calendar"?"primary":"soft";tab.setAttribute("aria-pressed",String(attendanceDisplayMode==="calendar"))}
+ if(tableTab){tableTab.className=attendanceDisplayMode==="table"?"primary":"soft";tableTab.setAttribute("aria-pressed",String(attendanceDisplayMode==="table"))}
+ if(attendanceDisplayMode==="table")renderAttendanceRecordsTable();
+}
+function renderAttendanceRecordsTable(){
+ const host=$("attendanceRecordsTable");if(!host)return;
+ const month=$("attendanceTableMonth")?.value||($("attendanceDate")?.value||new Date().toISOString().slice(0,10)).slice(0,7);
+ const rows=Object.values(state.attendance||{}).filter(r=>String(r.date||r.duty_date||"").startsWith(month)).sort((a,b)=>String(a.date||a.duty_date).localeCompare(String(b.date||b.duty_date)));
+ if(!rows.length){host.innerHTML='<div class="empty">No attendance records for this month yet.</div>';return}
+ const body=rows.map(r=>{
+  const date=r.date||r.duty_date||"",branch=r.branch||BRANCHES.find(b=>Object.entries(branchIds).some(([id,n])=>n===b&&id===r.branch_id))||"";
+  const staff=state.staff.find(s=>s.id===(r.staffId||r.staff_id))?.name||"—";
+  const status=String(r.status||"").toLowerCase(),label=status?status.charAt(0).toUpperCase()+status.slice(1):"Not recorded";
+  const cls=status==="present"?"available":status==="late"?"unsure":status==="absent"?"unavailable":"";
+  return `<tr><td>${escapeHtml(date)}</td><td>${escapeHtml(branch)}</td><td>${escapeHtml(staff)}</td><td>${escapeHtml(String(r.timeIn||r.time_in||"").slice(0,5)||"—")}</td><td><span class="tag ${cls}">${escapeHtml(label)}</span></td><td>${escapeHtml(r.replacementStaffName||r.replacement_staff_id||"—")}</td><td>${escapeHtml(r.notes||"—")}</td></tr>`;
+ }).join("");
+ host.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Branch</th><th>Scheduled staff</th><th>Time-in</th><th>Status</th><th>Replacement</th><th>Notes</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
 function renderAttendance(){
  renderAttendanceMonthCalendar();
+ if(attendanceDisplayMode==="table")renderAttendanceRecordsTable();
  const date=$("attendanceDate")?.value||new Date().toISOString().slice(0,10),branch=$("attendanceBranch")?.value||BRANCHES[0];
  if(!isAdmin){$("attendanceRecords").innerHTML='<div class="empty">Admin login is required to record attendance.</div>';return}
  const setting=state.branchTimeIns[branch]||{};const expected=setting.expectedTime||'';const grace=Number(setting.graceMinutes||0);
@@ -663,6 +701,9 @@ $("attendancePrevMonth").addEventListener("click",()=>changeAttendanceMonth(-1))
 $("attendanceNextMonth").addEventListener("click",()=>changeAttendanceMonth(1));
 $("attendanceToday").addEventListener("click",()=>{const today=new Date().toISOString().slice(0,10);$("attendanceDate").value=today;$("attendanceMonth").value=today.slice(0,7);renderAttendance()});
 $("attendanceBranch").addEventListener("change",renderAttendance);
+$("attendanceCalendarTab").addEventListener("click",()=>setAttendanceDisplayMode("calendar"));
+$("attendanceTableTab").addEventListener("click",()=>setAttendanceDisplayMode("table"));
+$("attendanceTableMonth").addEventListener("change",renderAttendanceRecordsTable);
 $("saveBranchTimeSettings").addEventListener("click",saveBranchTimeSettings);
 $("exportAttendanceCsv").addEventListener("click",exportAttendanceCsv);
 $("exportSwapCsv").addEventListener("click",()=>{const rows=[['Date','Branch','Originally scheduled staff','Staff who covered','Notes'],...(state.scheduleChanges||[]).map(x=>[x.date,x.branch,x.fromName,x.toName,x.notes||''])];const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='buko-schedule-swap-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000)});
